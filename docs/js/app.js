@@ -27,11 +27,10 @@ function armHints() {
     speak("Still looking. Slowly turn the pack. The barcode is usually on the back or the bottom. Hold it about 20 centimetres from the camera.");
   }, 9000));
   hintTimers.push(setTimeout(() => {
-    speak("I can't find a barcode. Say or tap read label to hear the printed text instead.");
-    armHintsLater();
+    if (busy) return;
+    speak("I can't find a barcode, so I will try to read the label.").then(readLabel);
   }, 24000));
 }
-function armHintsLater() { hintTimers.push(setTimeout(armHints, 20000)); }
 
 // ------------------------------------------------------------ main flow
 async function start() {
@@ -59,6 +58,7 @@ async function start() {
   await speak("Ready. Point the barcode at the camera and hold steady. Say or tap read label if there is no barcode.");
   armHints();
   setTimeout(() => import("./ocr.js").then((m) => navigator.onLine && m.warmUp()), 4000);
+  setTimeout(() => import("./vision.js").then((m) => navigator.onLine && m.warmUp()), 9000);
 }
 
 async function handleCode(code) {
@@ -103,30 +103,62 @@ async function readLabel() {
   try {
     const ocr = await import("./ocr.js");
     const shot = scanner.snapshot();
-    const { text } = await ocr.readLabel(shot);
-    if (!text.trim()) {
-      beep("fail");
-      await speak("I could not read any text. Try more light, hold the front of the pack steady, and try again.");
-    } else {
+    let text = "";
+    try { text = (await ocr.readLabel(shot)).text; } catch { /* text reader unavailable: still try the camera model */ }
+    const parts = [];
+    let body = "";
+    if (text.trim()) {
       const f = ocr.extractFacts(text);
-      const parts = [];
       if (f.mrp) parts.push(`M R P ${f.mrp} rupees`);
       if (f.net) parts.push(`Net quantity ${f.net}`);
       if (f.bestBefore) parts.push(f.bestBefore);
       const guess = ocr.matchKnown(text, await allKnown());
       if (guess) parts.push(`The text looks like ${guess.brand ? guess.brand + " " : ""}${guess.name}. This is only a guess, please confirm`);
-      const body = text.replace(/\n/g, ". ").slice(0, 450);
-      beep("ok");
-      setStatus("Label text read.");
+      body = text.replace(/\n/g, ". ").slice(0, 450);
       $("transcript").dataset.ocr = text;
-      await speak(`${parts.length ? parts.join(". ") + ". " : ""}Text I could read: ${body}. Text reading can make mistakes.`);
+    }
+    const seen = await visualGuess(shot, text);
+    if (seen) parts.unshift(seen);
+
+    if (!parts.length && !body) {
+      beep("fail");
+      await speak("I could not identify this product or read any text. Try more light, hold the front of the pack steady, and try again.");
+    } else {
+      beep("ok");
+      setStatus("Label read.");
+      const tail = body ? `Text I could read: ${body}. Text reading can make mistakes.` : "";
+      await speak(`${parts.length ? parts.join(". ") + ". " : ""}${tail}`);
     }
   } catch {
-    await speak("The text reader is not available right now. Please try again when you have a signal.");
+    await speak("The label reader is not available right now. Please try again.");
   }
   busy = false;
   scanner.resume();
   armHints();
+}
+
+// Camera-model guess, only ever spoken with a safeguard (see vision.js).
+async function visualGuess(shot, text) {
+  let vision;
+  try { vision = await import("./vision.js"); } catch { return ""; }
+  let top;
+  try { [top] = await vision.detect(shot, { conf: 0.5 }); } catch { return ""; }
+  if (!top) return "";
+  const name = vision.speakable(top.label);
+  if (text.trim()) {
+    // there is text on the pack: the guess must agree with it, else stay silent
+    return vision.agreesWithText(top.index, text)
+      ? `The camera recognises ${name}, and the text on the pack agrees. Please check the pack size`
+      : "";
+  }
+  // no readable text: accept only a stable guess over 3 frames, and say it is uncertain
+  if (top.conf < 0.8) return "";
+  for (let i = 0; i < 2; i++) {
+    await new Promise((r) => setTimeout(r, 350));
+    const [again] = await vision.detect(scanner.snapshot(), { conf: 0.5 });
+    if (!again || again.index !== top.index) return "";
+  }
+  return `I cannot read the text, but the camera thinks this may be ${name}. My camera model only knows a small set of products and can be wrong, so please confirm with someone before relying on it`;
 }
 
 // ------------------------------------------------------------ follow-ups

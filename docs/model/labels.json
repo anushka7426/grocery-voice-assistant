@@ -1,0 +1,176 @@
+{
+ "names": [
+  "Bisconni Chocolate Chip Cookies 46.8gm",
+  "Coca Cola Can 250ml",
+  "Colgate Maximum Cavity Protection 75gm",
+  "Fanta 500ml",
+  "Fresher Guava Nectar 500ml",
+  "Fruita Vitals Red Grapes 200ml",
+  "Islamabad Tea 238gm",
+  "Kolson Slanty Jalapeno 18gm",
+  "Kurkure Chutney Chaska 62gm",
+  "LU Candi Biscuit 60gm",
+  "LU Oreo Biscuit 19gm",
+  "LU Prince Biscuit 55.2gm",
+  "Lays Masala 34gm",
+  "Lays Wavy Mexican Chili 34gm",
+  "Lifebuoy Total Protect Soap 96gm",
+  "Lipton Yellow Label Tea 95gm",
+  "Meezan Ultra Rich Tea 190gm",
+  "Peek Freans Sooper Biscuit 13.2gm",
+  "Safeguard Bar Soap Pure White 175gm",
+  "Shezan Apple 250ml",
+  "Sunsilk Shampoo Soft - Smooth 160ml",
+  "Super Crisp BBQ 30gm",
+  "Supreme Tea 95gm",
+  "Tapal Danedar 95gm",
+  "Vaseline Healthy White Lotion 100ml"
+ ],
+ "keywords": [
+  [
+   [
+    "bisconni"
+   ]
+  ],
+  [
+   [
+    "coca",
+    "cola",
+    "coke"
+   ]
+  ],
+  [
+   [
+    "colgate"
+   ]
+  ],
+  [
+   [
+    "fanta"
+   ]
+  ],
+  [
+   [
+    "fresher",
+    "guava"
+   ]
+  ],
+  [
+   [
+    "fruita",
+    "vitals"
+   ]
+  ],
+  [
+   [
+    "islamabad"
+   ]
+  ],
+  [
+   [
+    "kolson",
+    "slanty"
+   ]
+  ],
+  [
+   [
+    "kurkure",
+    "chaska"
+   ]
+  ],
+  [
+   [
+    "candi"
+   ]
+  ],
+  [
+   [
+    "oreo"
+   ]
+  ],
+  [
+   [
+    "prince"
+   ]
+  ],
+  [
+   [
+    "lays",
+    "lay"
+   ],
+   [
+    "masala"
+   ]
+  ],
+  [
+   [
+    "lays",
+    "lay"
+   ],
+   [
+    "wavy",
+    "mexican"
+   ]
+  ],
+  [
+   [
+    "lifebuoy"
+   ]
+  ],
+  [
+   [
+    "lipton"
+   ]
+  ],
+  [
+   [
+    "meezan"
+   ]
+  ],
+  [
+   [
+    "peek",
+    "freans",
+    "sooper"
+   ]
+  ],
+  [
+   [
+    "safeguard"
+   ]
+  ],
+  [
+   [
+    "shezan"
+   ]
+  ],
+  [
+   [
+    "sunsilk"
+   ]
+  ],
+  [
+   [
+    "crisp"
+   ]
+  ],
+  [
+   [
+    "supreme"
+   ]
+  ],
+  [
+   [
+    "tapal",
+    "danedar"
+   ]
+  ],
+  [
+   [
+    "vaseline"
+   ]
+  ]
+ ],
+ "imgsz": 640,
+ "note": "Trained on a Roboflow dataset of 25 Pakistani-market products (CC BY 4.0). Only these 25 products are known."
+}

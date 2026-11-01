@@ -1,12 +1,12 @@
 // Offline support: the app shell and scanner are cached on install; the text
-// reader (large) is cached the first time it is used while online.
+// reader and the camera model (large) are cached the first time they are used while online.
 // Open Food Facts requests are never cached here (app code caches results itself).
 
-const VERSION = "gva-v1";
+const VERSION = "gva-v2";
 const SHELL = [
   "./", "index.html", "styles.css", "manifest.webmanifest",
   "js/app.js", "js/scanner.js", "js/lookup.js", "js/describe.js", "js/speech.js",
-  "js/store.js", "js/gtin.js", "js/ocr.js", "data/products-in.json",
+  "js/store.js", "js/vision.js", "js/gtin.js", "js/ocr.js", "data/products-in.json",
   "vendor/zxing/reader/index.js", "vendor/zxing/share.js", "vendor/zxing/zxing_reader.wasm",
   "icons/icon-192.png", "icons/icon-512.png",
 ];
