@@ -1,0 +1,28 @@
+{
+  "_comment": "Bundled offline product records. Only add mappings you have verified on a real pack. The app also learns products at runtime (saved on the phone) and from Open Food Facts.",
+  "products": {
+    "8901063368521": {
+      "name": "Gobbles Fruity Fun Cake",
+      "brand": "Britannia",
+      "quantity": "30 g",
+      "source": "BigBasket listing (from your earlier database)"
+    },
+    "8901063139374": {
+      "name": "Bourbon biscuits",
+      "brand": "Britannia",
+      "quantity": "",
+      "source": "your test photo; add pack size after checking the pack"
+    },
+    "8901058017687": {
+      "name": "Maggi Masala Noodles",
+      "brand": "Maggi, Nestle India",
+      "quantity": "70 g",
+      "source": "your test photo of the pack"
+    }
+  },
+  "prefixes": {
+    "_comment": "GS1 India company prefixes (first 7 digits). Used only as a hint when a barcode is not in any database. Add more once verified on a real pack.",
+    "8901063": "Britannia",
+    "8901058": "Nestle India"
+  }
+}
