@@ -1,0 +1,244 @@
+import argparse
+from pathlib import Path
+import sys
+
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+
+from src.barcode.barcode_detector import scan_barcodes
+from src.database.product_lookup import lookup_product
+from src.ocr.ocr_reader import read_package_text
+from src.voice.speech_output import speak
+
+
+YOLO_MODEL_PATH = (
+    PROJECT_ROOT
+    / "runs/detect/runs/grocery_yolov8n/weights/best.pt"
+)
+YOLO_CONFIDENCE = 0.60
+
+_yolo_model = None
+_yolo_load_attempted = False
+
+
+def make_spoken_summary(product: dict) -> str:
+    parts = [product.get("name") or "Unknown product"]
+
+    if product.get("brand"):
+        parts.append(f"brand {product['brand']}")
+
+    if product.get("quantity"):
+        parts.append(f"package size {product['quantity']}")
+
+    if product.get("allergens"):
+        parts.append(f"allergen information: {product['allergens']}")
+
+    parts.append(
+        f"information source: {product.get('source', 'unknown')}"
+    )
+    return ". ".join(parts) + "."
+
+
+def try_ocr(image_path: str) -> str:
+    """Return supplementary, unverified package text."""
+    try:
+        return read_package_text(image_path)
+    except Exception as exc:
+        print(f"OCR unavailable: {exc}")
+        return ""
+
+
+def try_visual_suggestion(image_path: str):
+    """
+    Return the highest-confidence YOLO detection above the threshold.
+    The result is only an unverified visual suggestion.
+    """
+    global _yolo_model, _yolo_load_attempted
+
+    if not YOLO_MODEL_PATH.is_file():
+        print(f"YOLO model not found: {YOLO_MODEL_PATH}")
+        return None
+
+    if not _yolo_load_attempted:
+        _yolo_load_attempted = True
+        try:
+            from ultralytics import YOLO
+            _yolo_model = YOLO(str(YOLO_MODEL_PATH))
+        except Exception as exc:
+            print(f"Could not load YOLO model: {exc}")
+            return None
+
+    if _yolo_model is None:
+        return None
+
+    try:
+        results = _yolo_model.predict(
+            source=image_path,
+            imgsz=640,
+            conf=YOLO_CONFIDENCE,
+            save=False,
+            verbose=False,
+        )
+    except Exception as exc:
+        print(f"YOLO prediction failed: {exc}")
+        return None
+
+    if not results:
+        return None
+
+    boxes = results[0].boxes
+
+    if boxes is None or len(boxes) == 0:
+        return None
+
+    best_index = int(boxes.conf.argmax().item())
+    class_id = int(boxes.cls[best_index].item())
+    confidence = float(boxes.conf[best_index].item())
+
+    names = _yolo_model.names
+    if isinstance(names, dict):
+        label = names.get(class_id, f"class {class_id}")
+    else:
+        label = names[class_id]
+
+    return {
+        "label": label,
+        "confidence": confidence,
+    }
+
+
+def print_fallback_information(image_path: str):
+    """Try OCR and YOLO without treating either as verified identity."""
+    ocr_text = try_ocr(image_path)
+
+    if ocr_text:
+        print("Package text (UNVERIFIED):")
+        print(ocr_text)
+    else:
+        print("OCR did not produce readable text.")
+
+    suggestion = try_visual_suggestion(image_path)
+
+    if suggestion:
+        print("Possible visual match (UNVERIFIED):")
+        print(f"  Candidate: {suggestion['label']}")
+        print(f"  Confidence: {suggestion['confidence']:.3f}")
+        print(
+            "This is a model prediction, not a confirmed product identity."
+        )
+    else:
+        print(
+            "YOLO found no candidate above the configured "
+            f"confidence threshold of {YOLO_CONFIDENCE:.2f}."
+        )
+
+    return suggestion
+
+
+def announce(message: str, no_speech: bool) -> None:
+    print(f"Assistant message: {message}")
+
+    if not no_speech and not speak(message):
+        print("Speech was unavailable.")
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(
+        description="Barcode, database, OCR, YOLO and voice pipeline"
+    )
+    parser.add_argument("image", help="Path to the grocery image")
+    parser.add_argument(
+        "--offline",
+        action="store_true",
+        help="Use only the local product database",
+    )
+    parser.add_argument(
+        "--no-speech",
+        action="store_true",
+        help="Print messages without speaking",
+    )
+    args = parser.parse_args()
+
+    image_path = Path(args.image)
+    if not image_path.is_absolute():
+        image_path = Path.cwd() / image_path
+    image_path = image_path.resolve()
+
+    try:
+        barcodes = scan_barcodes(image_path)
+    except (FileNotFoundError, ValueError) as exc:
+        print(f"Image error: {exc}")
+        return 2
+
+    # No barcode: try OCR and then YOLO.
+    if not barcodes:
+        print("No barcode detected. Trying OCR and visual recognition...")
+        suggestion = print_fallback_information(str(image_path))
+
+        if suggestion:
+            message = (
+                "I could not verify this product. A visual model found "
+                "a possible match, but it may be wrong. Please check "
+                "the package label or try another angle."
+            )
+        else:
+            message = (
+                "I could not identify the product. Please show the "
+                "front of the package or try another angle."
+            )
+
+        announce(message, args.no_speech)
+        return 1
+
+    # A barcode exists; use the database before any visual fallback.
+    for index, barcode in enumerate(barcodes, start=1):
+        print(
+            f"\nBarcode {index}: "
+            f"{barcode.value} ({barcode.barcode_type})"
+        )
+
+        product = lookup_product(
+            barcode.value,
+            use_online=not args.offline,
+        )
+
+        if product is not None:
+            print("Product details:")
+            for key, value in product.items():
+                if value:
+                    print(f"  {key}: {value}")
+
+            # Speak details only when supplied by a database record.
+            announce(make_spoken_summary(product), args.no_speech)
+            continue
+
+        print(
+            f"Barcode {barcode.value} was detected, "
+            "but product information was not found."
+        )
+
+        suggestion = print_fallback_information(str(image_path))
+
+        if suggestion:
+            message = (
+                "The barcode was scanned, but I could not verify "
+                "the product details. A visual model found a possible "
+                "match, but it may be wrong. Please check the label."
+            )
+        else:
+            message = (
+                "The barcode was detected, but product information "
+                "was not found. No visual suggestion passed the "
+                "configured threshold. Please try another angle "
+                "or show the front of the package."
+            )
+
+        announce(message, args.no_speech)
+
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

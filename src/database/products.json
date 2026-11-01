@@ -1,0 +1,11 @@
+{
+  "_comment": "Verified barcode-to-product mappings.",
+  "products": {
+    "8901063368521": {
+      "name": "Gobbles Fruity Fun Cake",
+      "brand": "Britannia",
+      "quantity": "30 g",
+      "source": "BigBasket product listing"
+    }
+  }
+}

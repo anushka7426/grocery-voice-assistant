@@ -1,0 +1,24 @@
+yolov8-env/
+__pycache__/
+*.pyc
+*.Zone.Identifier
+debug_crops/
+runs/
+*.pt
+
+# Dataset
+dataset/
+*.zip
+
+# Training outputs and model weights
+runs/
+*.pt
+
+# Python environments and cache
+yolov8-env/
+.venv/
+__pycache__/
+*.pyc
+
+# Secrets
+.env

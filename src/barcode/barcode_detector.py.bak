@@ -1,0 +1,133 @@
+from dataclasses import dataclass
+from pathlib import Path
+
+import cv2
+from pyzbar.pyzbar import decode
+
+
+@dataclass
+class BarcodeResult:
+    value: str
+    barcode_type: str
+
+
+def _decode_image(image, results, seen):
+    """Decode an image and add new barcode results."""
+    if image is None or image.size == 0:
+        return
+
+    for item in decode(image):
+        value = item.data.decode("utf-8", errors="replace").strip()
+
+        if not value:
+            continue
+
+        result = BarcodeResult(
+            value=value,
+            barcode_type=item.type,
+        )
+        key = (result.value, result.barcode_type)
+
+        if key not in seen:
+            seen.add(key)
+            results.append(result)
+
+
+def scan_barcodes(image_path: str | Path) -> list[BarcodeResult]:
+    """
+    Try the original image, enhanced versions, and overlapping crops.
+    Return unique barcode results in discovery order.
+    """
+    path = Path(image_path)
+
+    if not path.is_file():
+        raise FileNotFoundError(f"Image not found: {path}")
+
+    image = cv2.imread(str(path))
+
+    if image is None:
+        raise ValueError(f"Could not read image: {path}")
+
+    results = []
+    seen = set()
+
+    # Attempt 1: Original image and full-image enhancements.
+    gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+    clahe = cv2.createCLAHE(
+        clipLimit=2.0,
+        tileGridSize=(8, 8),
+    )
+    enhanced = clahe.apply(gray)
+
+    _, binary = cv2.threshold(
+        enhanced,
+        0,
+        255,
+        cv2.THRESH_BINARY + cv2.THRESH_OTSU,
+    )
+
+    for variant in (image, gray, enhanced, binary):
+        _decode_image(variant, results, seen)
+
+    # Attempt 2: Overlapping crops. These help when a barcode is
+    # small relative to the photo or surrounded by a large background.
+    height, width = gray.shape
+
+    crop_width = max(1, int(width * 0.65))
+    crop_height = max(1, int(height * 0.60))
+
+    x_positions = sorted({
+        0,
+        (width - crop_width) // 2,
+        width - crop_width,
+    })
+    y_positions = sorted({
+        0,
+        (height - crop_height) // 2,
+        height - crop_height,
+    })
+
+    for y in y_positions:
+        for x in x_positions:
+            crop = gray[
+                y:y + crop_height,
+                x:x + crop_width,
+            ]
+
+            if crop.size == 0:
+                continue
+
+            # Enlarge the crop so small barcode lines are easier to read.
+            enlarged = cv2.resize(
+                crop,
+                None,
+                fx=1.5,
+                fy=1.5,
+                interpolation=cv2.INTER_CUBIC,
+            )
+
+            local_clahe = clahe.apply(enlarged)
+
+            _, local_binary = cv2.threshold(
+                local_clahe,
+                0,
+                255,
+                cv2.THRESH_BINARY + cv2.THRESH_OTSU,
+            )
+
+            _, adaptive = cv2.threshold(
+                local_clahe,
+                0,
+                255,
+                cv2.THRESH_BINARY + cv2.THRESH_OTSU,
+            )
+
+            for variant in (
+                enlarged,
+                local_clahe,
+                local_binary,
+                adaptive,
+            ):
+                _decode_image(variant, results, seen)
+
+    return results

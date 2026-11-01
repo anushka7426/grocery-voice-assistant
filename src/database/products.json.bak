@@ -1,0 +1,4 @@
+{
+  "_comment": "Add verified barcode-to-product mappings here. Do not guess barcode values.",
+  "products": {}
+}

@@ -1,0 +1,219 @@
+from dataclasses import dataclass
+from pathlib import Path
+
+import cv2
+from pyzbar.pyzbar import decode as pyzbar_decode
+
+try:
+    import zxingcpp
+except ImportError:
+    zxingcpp = None
+
+
+@dataclass
+class BarcodeResult:
+    value: str
+    barcode_type: str
+
+
+# Prefer standard retail product barcodes over decorative QR codes.
+PREFERRED_TYPES = {
+    "EAN13", "EAN8", "UPCA", "UPCE",
+    "EAN-13", "EAN-8", "UPC-A", "UPC-E",
+}
+
+
+def _unique(results):
+    output = []
+    seen = set()
+
+    for result in results:
+        key = (result.value, result.barcode_type)
+        if result.value and key not in seen:
+            seen.add(key)
+            output.append(result)
+
+    return output
+
+
+def _decode_one(image):
+    """Try both installed barcode decoding libraries."""
+    results = []
+
+    try:
+        for item in pyzbar_decode(image):
+            value = item.data.decode(
+                "utf-8", errors="replace"
+            ).strip()
+
+            if value:
+                results.append(
+                    BarcodeResult(value, item.type)
+                )
+    except Exception:
+        pass
+
+    if zxingcpp is not None:
+        try:
+            for item in zxingcpp.read_barcodes(image):
+                value = str(item.text).strip()
+
+                if value:
+                    results.append(
+                        BarcodeResult(
+                            value,
+                            str(item.format).upper().replace("-", ""),
+                        )
+                    )
+        except Exception:
+            pass
+
+    return _unique(results)
+
+
+def _is_retail_barcode(result):
+    return (
+        result.barcode_type.upper().replace("-", "")
+        in {"EAN13", "EAN8", "UPCA", "UPCE"}
+    )
+
+
+def _variants(image):
+    """Generate automatic image enhancements and scaled versions."""
+    gray = (
+        cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+        if image.ndim == 3
+        else image.copy()
+    )
+
+    clahe = cv2.createCLAHE(
+        clipLimit=2.0,
+        tileGridSize=(8, 8),
+    ).apply(gray)
+
+    blurred = cv2.GaussianBlur(gray, (0, 0), 2)
+    sharpened = cv2.addWeighted(
+        gray, 1.7, blurred, -0.7, 0
+    )
+
+    _, otsu = cv2.threshold(
+        clahe, 0, 255,
+        cv2.THRESH_BINARY + cv2.THRESH_OTSU,
+    )
+
+    adaptive = cv2.adaptiveThreshold(
+        clahe, 255,
+        cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
+        cv2.THRESH_BINARY,
+        31, 11,
+    )
+
+    bases = [
+        image, gray, clahe, sharpened,
+        otsu, cv2.bitwise_not(otsu),
+        adaptive, cv2.bitwise_not(adaptive),
+    ]
+
+    for base in bases:
+        yield base
+
+        largest_dimension = max(base.shape[:2])
+
+        if largest_dimension <= 1200:
+            yield cv2.resize(
+                base, None, fx=2, fy=2,
+                interpolation=cv2.INTER_CUBIC,
+            )
+
+        if largest_dimension <= 500:
+            yield cv2.resize(
+                base, None, fx=3, fy=3,
+                interpolation=cv2.INTER_CUBIC,
+            )
+
+    # Handle images where the package or camera is rotated.
+    for base in (gray, clahe):
+        yield cv2.rotate(base, cv2.ROTATE_90_CLOCKWISE)
+        yield cv2.rotate(base, cv2.ROTATE_90_COUNTERCLOCKWISE)
+
+
+def _regions(image):
+    """Search the full photo and overlapping crops automatically."""
+    height, width = image.shape[:2]
+
+    yield image
+
+    # Grocery barcodes are often on the lower or rear portion
+    # of a package. These crops retain the full image width.
+    for start in (0.45, 0.55, 0.65, 0.72):
+        y = int(start * height)
+        if height - y >= 30:
+            yield image[y:height, :]
+
+    # Search overlapping tiles so small barcodes become larger.
+    crop_width = max(1, int(width * 0.70))
+    crop_height = max(1, int(height * 0.45))
+
+    x_positions = sorted({
+        0,
+        int(0.15 * width),
+        int(0.30 * width),
+    })
+    y_positions = sorted({
+        0,
+        int(0.30 * height),
+        int(0.55 * height),
+    })
+
+    for y in y_positions:
+        for x in x_positions:
+            x2 = min(width, x + crop_width)
+            y2 = min(height, y + crop_height)
+
+            if x2 > x and y2 > y:
+                yield image[y:y2, x:x2]
+
+    # An additional lower-right region helps with packets whose
+    # barcode is printed near the bottom-right corner.
+    yield image[
+        int(0.50 * height):height,
+        int(0.25 * width):width,
+    ]
+
+
+def scan_barcodes(image_path: str | Path) -> list[BarcodeResult]:
+    """
+    Try pyzbar and ZXing on enhanced images and overlapping crops.
+    Prefer retail barcodes such as EAN-13 when several formats occur.
+    """
+    path = Path(image_path)
+
+    if not path.is_file():
+        raise FileNotFoundError(f"Image not found: {path}")
+
+    image = cv2.imread(str(path))
+
+    if image is None:
+        raise ValueError(f"Could not read image: {path}")
+
+    other_results = []
+
+    for region in _regions(image):
+        region_results = []
+
+        for variant in _variants(region):
+            region_results.extend(_decode_one(variant))
+
+        region_results = _unique(region_results)
+
+        retail_results = [
+            result for result in region_results
+            if _is_retail_barcode(result)
+        ]
+
+        if retail_results:
+            return retail_results
+
+        other_results.extend(region_results)
+
+    return _unique(other_results)
