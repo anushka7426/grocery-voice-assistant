@@ -44,7 +44,7 @@ const CATEGORIES = [
 ];
 
 // lines that are boilerplate, not product names
-const NOISE = /(cut|tear|here|fssai|lic|mfd|mfg|batch|best\s*before|use\s*by|expiry|net\s*(qty|quantity|wt|weight)|customer|consumer|care|ingredients|nutrition|storage|keep|store|veg|marketed|manufactured|address|www|\.com|mrp|incl|taxes|price|barcode|recycle|pack\b|^only$|^tm$|^new$|\bltd\b|limited|\bpvt\b|private|industries|\bindia\b|manufactur|company)/i;
+const NOISE = /(cut|tear|here|fssai|lic|mfd|mfg|batch|best\s*before|use\s*by|expiry|net\s*(qty|quantity|wt|weight)|customer|consumer|care|ingredients|nutrition|storage|keep|store|veg|marketed|manufactured|address|www|\.com|mrp|incl|taxes|price|barcode|recycle|pack\b|^only$|^tm$|^new$|\bltd\b|limited|\bpvt\b|private|industries|india|packing|months|ld$|manufactur|company)/i;
 
 const norm = (s) => s.toLowerCase().replace(/[^a-z0-9]/g, "");
 
