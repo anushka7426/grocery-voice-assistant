@@ -25,7 +25,9 @@ The camera needs HTTPS on a real phone: publish with GitHub Pages (Settings > Pa
 
 ## Add products
 
-Edit `docs/data/products-in.json` (only barcodes you verified on a real pack). Products taught on a phone are stored on that phone.
+- **In the app:** after an unknown scan tap *Add details or correct the name* (name, brand, pack size, price, ingredients, allergens, vegetarian). You can type each field or tap *Say it* to dictate. *Settings > Add a product by hand* adds one without scanning, and *Edit this product* corrects any product. *Settings > My saved products* lists, edits and deletes them, and exports or imports a backup file.
+- **Saved products live on that phone only.** Use the backup file to move them to another phone, or merge the `products` entries from it into `docs/data/products-in.json` so every user gets them.
+- Leave allergens empty if unknown (the app then says "not available"); type `none` only if the pack says there are no allergens.
 
 ## Python prototype
 

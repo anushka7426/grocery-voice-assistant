@@ -37,7 +37,8 @@
   </div>
 
   <button id="save" class="big primary" hidden>Save</button>
-  <button id="teach" class="big" hidden>Teach this product</button>
+  <button id="teach" class="big" hidden>Add details or correct the name</button>
+  <button id="edit" class="big" hidden>Edit this product</button>
 
   <details class="settings">
     <summary>Settings</summary>
@@ -46,6 +47,10 @@
       <button id="light">Light on or off</button>
       <button id="slower">Speak slower</button>
       <button id="faster">Speak faster</button>
+    </div>
+    <div class="row">
+      <button id="addManual">Add a product by hand</button>
+      <button id="mine">My saved products</button>
     </div>
     <label class="check"><input type="checkbox" id="sr"> Use my screen reader (TalkBack or VoiceOver) instead of the app voice</label>
   </details>
@@ -56,16 +61,39 @@
 <dialog id="dlg" aria-labelledby="dlgTitle">
   <form method="dialog" id="teachForm">
     <h2 id="dlgTitle">Save this product</h2>
-    <p>Barcode <span id="teachCode"></span></p>
-    <label>Product name <input id="teachName" autocomplete="off"></label>
-    <button type="button" id="dictate">Say the name</button>
-    <label>Brand (optional) <input id="teachBrand" autocomplete="off"></label>
-    <label>Pack size (optional) <input id="teachQty" autocomplete="off" placeholder="for example 70 g"></label>
+    <label>Barcode <input id="fCode" inputmode="numeric" autocomplete="off" readonly></label>
+    <label>Product name (required)
+      <span class="field"><input id="fName" autocomplete="off"><button type="button" class="say" data-for="fName">Say it</button></span></label>
+    <label>Brand
+      <span class="field"><input id="fBrand" autocomplete="off"><button type="button" class="say" data-for="fBrand">Say it</button></span></label>
+    <label>Pack size
+      <span class="field"><input id="fQty" autocomplete="off" placeholder="for example 70 g"><button type="button" class="say" data-for="fQty">Say it</button></span></label>
+    <label>Price in rupees
+      <span class="field"><input id="fMrp" inputmode="decimal" autocomplete="off" placeholder="for example 10"><button type="button" class="say" data-for="fMrp">Say it</button></span></label>
+    <label>Ingredients
+      <span class="field"><input id="fIng" autocomplete="off"><button type="button" class="say" data-for="fIng">Say it</button></span></label>
+    <label>Allergens, separated by commas
+      <span class="field"><input id="fAll" autocomplete="off" placeholder="for example milk, nuts"><button type="button" class="say" data-for="fAll">Say it</button></span></label>
+    <p class="hint">Leave allergens empty if you do not know. Type none only if the pack says it has no allergens.</p>
+    <label>Vegetarian
+      <select id="fDiet"><option value="unknown">Not sure</option><option value="vegetarian">Vegetarian (green dot)</option><option value="non-vegetarian">Non-vegetarian (brown dot)</option></select></label>
     <div class="row">
       <button value="save" class="primary">Save</button>
       <button value="cancel">Cancel</button>
     </div>
   </form>
+</dialog>
+
+<dialog id="mineDlg" aria-labelledby="mineTitle">
+  <h2 id="mineTitle">My saved products</h2>
+  <p id="mineCount"></p>
+  <ul id="mineList"></ul>
+  <div class="row">
+    <button id="exportBtn">Export a backup file</button>
+    <button id="importBtn">Import a backup file</button>
+    <input type="file" id="importFile" accept="application/json,.json" hidden>
+    <button id="mineClose" class="primary">Close</button>
+  </div>
 </dialog>
 
 <script type="module" src="js/app.js"></script>

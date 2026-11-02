@@ -27,3 +27,14 @@ dialog label { display:block; margin: 10px 0; }
 dialog input { display:block; width:100%; font: inherit; padding: 12px; margin-top:6px; border-radius:10px; border:3px solid var(--fg); background:#000; color:var(--fg); }
 [hidden] { display: none !important; }
 @media (prefers-reduced-motion: reduce) { * { transition: none !important; animation: none !important; } }
+
+.field { display:flex; gap:8px; margin-top:6px; }
+.field input { margin-top:0; flex:1; min-width:0; }
+.field .say { flex:none; min-height:48px; padding:8px 12px; }
+dialog select { display:block; width:100%; font: inherit; padding: 12px; margin-top:6px; border-radius:10px; border:3px solid var(--fg); background:#000; color:var(--fg); }
+dialog input[readonly] { border-color:#666; color:#bbb; }
+dialog { max-height: 92vh; overflow:auto; }
+.hint { color:#bbb; font-size: .9rem; margin: 4px 0; }
+#mineList { list-style:none; padding:0; margin: 8px 0; }
+#mineList li { border-bottom:2px solid var(--muted); padding:10px 0; }
+#mineList .row { margin: 6px 0 0; }

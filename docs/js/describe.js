@@ -7,6 +7,7 @@ export function summary(p) {
   const out = [p.brand && !p.name.toLowerCase().includes(p.brand.toLowerCase())
     ? `${p.brand} ${p.name}` : p.name];
   if (p.quantity) out.push(`Pack size ${p.quantity}`);
+  if (p.mrp) out.push(`Price ${p.mrp} rupees`);
   if (p.diet === "vegetarian") out.push("Marked vegetarian in the database");
   else if (p.diet === "non-vegetarian") out.push("Warning: contains non-vegetarian ingredients");
   if (p.allergens && p.allergens.length) out.push(`Contains allergens: ${p.allergens.join(", ")}`);
@@ -48,7 +49,9 @@ export function answer(intent, p) {
     case "size":
       return p.quantity ? `Pack size ${p.quantity}.` : "Pack size is not available.";
     case "price":
-      return "Price is not in the product database. Say read label to hear the M R P printed on the pack.";
+      return p.mrp
+        ? `Price ${p.mrp} rupees, as saved. Prices change, so check the shelf label.`
+        : "Price is not saved for this product. Say read label to hear the M R P printed on the pack.";
     case "name":
       return sentence(summary(p).split(". ")[0]);
     case "repeat":

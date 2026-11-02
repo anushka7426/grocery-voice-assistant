@@ -1,5 +1,5 @@
 import { Scanner } from "./scanner.js";
-import { lookup, saveCustom, allKnown } from "./lookup.js";
+import { lookup, saveCustom, deleteCustom, listCustom, allKnown } from "./lookup.js";
 import { summary, answer, parseIntent } from "./describe.js";
 import { speak, stopSpeaking, beep, buzz, bindLive, getSettings, setRate, setScreenReaderMode } from "./speech.js";
 import { isIndian } from "./gtin.js";
@@ -76,7 +76,7 @@ async function handleCode(code) {
     lastMiss = null;
     const text = summary(res.product);
     setStatus(`${res.product.name} — ${res.product.source}`);
-    $("followups").hidden = false; $("teach").hidden = true;
+    $("followups").hidden = false; $("teach").hidden = true; $("edit").hidden = false;
     await speak(text);
   } else {
     lastMiss = code;
@@ -151,18 +151,19 @@ async function readFront({ code = null, wait = 0 } = {}) {
     if (!parts.length) {
       beep("fail");
       setStatus("Could not identify.");
-      await speak("I could not read enough text. Turn the pack so the front faces the camera, add more light, hold it about 20 centimetres away, and try again.");
+      if (code) $("teach").hidden = false;
+      await speak(`I could not read enough text. ${code ? "You can tap Add details to type or say the name yourself, or " : "Please "}turn the pack so the front faces the camera, add more light, hold it about 20 centimetres away, and try again.`);
     } else {
       beep("ok");
       setStatus(who.name || "Pack read.");
       $("transcript").dataset.ocr = text;
       const guess = who.name ? "I am not certain, please confirm. " : "";
       let tail = "";
-      if (code && who.name) {
-        pendingSave = { code, name: who.name, brand: who.brand, quantity: facts.net || "" };
+      if (code && who.name && lastMiss === code) {            // skip if the user already saved it by hand
+        pendingSave = { code, name: who.name, brand: who.brand, quantity: facts.net || "", mrp: facts.mrp || "" };
         $("save").textContent = `Save as ${who.name}`;
         $("save").hidden = false;
-        tail = ` Tap Save, or say save, to remember this barcode as ${who.name}.`;
+        tail = ` Tap Save, or say save, to remember this barcode as ${who.name}. Or tap Add details to change the name or add more.`;
       }
       await speak(`${parts.join(". ")}. ${guess}${tail}`.trim());
     }
@@ -202,11 +203,18 @@ async function visualGuess(shot, text) {
 async function savePending() {
   if (!pendingSave) { speak("There is nothing to save."); return; }
   const p = pendingSave;
-  await saveCustom(p.code, { name: p.name, brand: p.brand, quantity: p.quantity, ingredients: "", allergens: null, nutrition: null, diet: "unknown" });
-  current = { code: p.code, product: { name: p.name, brand: p.brand, quantity: p.quantity, allergens: null, nutrition: null, diet: "unknown", source: "saved on this phone" } };
+  await commitProduct(p.code, { name: p.name, brand: p.brand, quantity: p.quantity, mrp: p.mrp || "", ingredients: "", allergens: null, diet: "unknown" });
+}
+
+/** Store a product on this phone and make it the current one. */
+async function commitProduct(code, rec) {
+  const product = { traces: null, nutrition: null, ...rec };
+  await saveCustom(code, product);
+  current = { code, product: { ...product, source: "saved on this phone" } };
   pendingSave = null; lastMiss = null;
-  $("save").hidden = true; $("teach").hidden = true;
-  await speak(`Saved as ${p.name}. Next time this barcode is scanned I will say it straight away, even without internet.`);
+  $("save").hidden = true; $("teach").hidden = true; $("edit").hidden = false; $("followups").hidden = false;
+  setStatus(`${product.name} — saved on this phone`);
+  await speak(`Saved as ${product.name}. Next time this barcode is scanned I will say it straight away, even without internet.`);
 }
 
 // ------------------------------------------------------------ follow-ups
@@ -241,34 +249,114 @@ function askByVoice() {
   });
 }
 
-// ------------------------------------------------------------ teach a product
-function teach() {
-  if (!lastMiss) { speak("There is no unknown product to save. Scan one first."); return; }
-  scanner.pause(); clearHints();
-  $("teachCode").textContent = lastMiss;
-  $("dlg").showModal();
-  $("teachName").focus();
-  speak("Type or say the product name. A sighted helper can also fill this in.");
-}
-$("dictate").onclick = () => {
-  if (!SR) return speak("Dictation is not supported here. Please type the name.");
-  stopSpeaking();
-  const r = new SR(); r.lang = "en-IN";
-  r.onresult = (e) => { $("teachName").value = e.results[0][0].transcript; };
-  r.start();
+// ------------------------------------------------------------ add / edit a product
+const F = (id) => $(id);
+const allergenText = (a) => (a === null || a === undefined ? "" : a.length ? a.join(", ") : "none");
+const parseAllergens = (t) => {
+  t = t.trim();
+  if (!t) return null;                                  // unknown, never "none"
+  if (/^(none|no|nil)$/i.test(t)) return [];
+  return t.split(/,|;|\band\b/i).map((x) => x.trim().toLowerCase()).filter(Boolean);
 };
+
+/** Open the product form. `code` is the barcode, `p` an optional product to prefill/edit. */
+function openForm(code, p = {}, { manual = false } = {}) {
+  scanner?.pause(); clearHints();
+  F("fCode").value = code || "";
+  F("fCode").readOnly = !manual;
+  F("fName").value = p.name || ""; F("fBrand").value = p.brand || ""; F("fQty").value = p.quantity || "";
+  F("fMrp").value = p.mrp || ""; F("fIng").value = p.ingredients || "";
+  F("fAll").value = allergenText(p.allergens); F("fDiet").value = p.diet || "unknown";
+  F("dlgTitle").textContent = manual ? "Add a product" : p.source === "saved on this phone" ? "Edit this product" : "Save this product";
+  $("dlg").showModal();
+  (manual ? F("fCode") : F("fName")).focus();
+  speak(manual ? "Add a product. Type the barcode number and the details." : "Type or say the product name and any details. A sighted helper can also fill this in.");
+}
+
+$("teach").onclick = () => {
+  if (!lastMiss) { speak("There is no unknown product to add. Scan one first."); return; }
+  openForm(lastMiss, pendingSave || {});
+};
+$("edit").onclick = () => {
+  if (!current) { speak("Scan a product first."); return; }
+  openForm(current.code, current.product);
+};
+$("addManual").onclick = () => { if (!scanner) return; openForm("", {}, { manual: true }); };
+
+document.querySelectorAll(".say").forEach((btn) => {
+  btn.onclick = () => {
+    if (!SR) return speak("Dictation is not supported here. Please type it.");
+    stopSpeaking();
+    const r = new SR(); r.lang = "en-IN";
+    const target = F(btn.dataset.for);
+    r.onresult = (e) => { target.value = e.results[0][0].transcript.replace(/\.$/, ""); };
+    r.start();
+  };
+});
+
 $("teachForm").onsubmit = async (e) => {
-  const name = $("teachName").value.trim();
-  if (e.submitter?.value === "cancel" || !name) { $("dlg").close(); scanner.resume(); return; }
+  if (e.submitter?.value === "cancel") { $("dlg").close(); scanner?.resume(); armHints(); return; }
+  const name = F("fName").value.trim();
+  const code = F("fCode").value.replace(/\s+/g, "");
+  if (!name || !/^\d{6,14}$/.test(code)) {
+    e.preventDefault();                                  // keep the form open
+    speak(!name ? "Please enter the product name." : "Please enter the barcode number, digits only.");
+    (!name ? F("fName") : F("fCode")).focus();
+    return;
+  }
   e.preventDefault();
-  await saveCustom(lastMiss, {
-    name, brand: $("teachBrand").value.trim(), quantity: $("teachQty").value.trim(),
-    ingredients: "", allergens: null, nutrition: null, diet: "unknown",
+  $("dlg").close();
+  await commitProduct(code, {
+    name, brand: F("fBrand").value.trim(), quantity: F("fQty").value.trim(), mrp: F("fMrp").value.trim(),
+    ingredients: F("fIng").value.trim(), allergens: parseAllergens(F("fAll").value), diet: F("fDiet").value,
   });
-  current = { code: lastMiss, product: { name, brand: $("teachBrand").value.trim(), quantity: $("teachQty").value.trim(), allergens: null, nutrition: null, diet: "unknown", source: "saved on this phone" } };
-  $("dlg").close(); $("teachForm").reset(); $("teach").hidden = true; lastMiss = null;
-  await speak(`Saved ${name}. I will recognise it next time, even without internet.`);
-  scanner.resume(); armHints();
+  scanner?.resume(); armHints();
+};
+
+// ---- my saved products: list, edit, delete, backup
+async function showMine() {
+  scanner?.pause(); clearHints();
+  const items = await listCustom();
+  $("mineCount").textContent = items.length ? `${items.length} saved on this phone.` : "Nothing saved yet.";
+  const ul = $("mineList"); ul.textContent = "";
+  for (const it of items) {
+    const li = document.createElement("li");
+    li.append(`${it.name}${it.brand ? " — " + it.brand : ""} (${it.code})`);
+    const row = document.createElement("div"); row.className = "row";
+    const ed = document.createElement("button"); ed.textContent = "Edit"; ed.setAttribute("aria-label", `Edit ${it.name}`);
+    ed.onclick = () => { $("mineDlg").close(); openForm(it.code, { ...it, source: "saved on this phone" }); };
+    const rm = document.createElement("button"); rm.textContent = "Delete"; rm.setAttribute("aria-label", `Delete ${it.name}`);
+    rm.onclick = async () => { await deleteCustom(it.code); if (current?.code === it.code) current = null; speak(`Deleted ${it.name}.`); showMine(); };
+    row.append(ed, rm); li.append(row); ul.append(li);
+  }
+  if (!$("mineDlg").open) $("mineDlg").showModal();
+}
+$("mine").onclick = showMine;
+$("mineClose").onclick = () => { $("mineDlg").close(); scanner?.resume(); armHints(); };
+$("exportBtn").onclick = async () => {
+  const items = await listCustom();
+  const products = {};
+  for (const { code, ...rest } of items) products[code] = rest;      // same shape as data/products-in.json
+  const blob = new Blob([JSON.stringify({ products }, null, 2)], { type: "application/json" });
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob); a.download = "my-products.json"; a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+  speak(`Backup file created with ${items.length} products.`);
+};
+$("importBtn").onclick = () => $("importFile").click();
+$("importFile").onchange = async (e) => {
+  const f = e.target.files[0]; e.target.value = "";
+  if (!f) return;
+  try {
+    const data = JSON.parse(await f.text());
+    let n = 0;
+    for (const [code, p] of Object.entries(data.products || {})) {
+      if (!/^\d{6,14}$/.test(code) || !p || typeof p.name !== "string" || !p.name.trim()) continue;
+      await saveCustom(code, { traces: null, nutrition: null, ingredients: "", allergens: null, diet: "unknown", ...p });
+      n++;
+    }
+    speak(`Imported ${n} products.`); showMine();
+  } catch { speak("That file could not be read."); }
 };
 
 // ------------------------------------------------------------ misc controls
@@ -289,7 +377,6 @@ $("nut").onclick = () => ask("nutrition");
 $("veg").onclick = () => ask("diet");
 $("label").onclick = readLabel;
 $("mic").onclick = askByVoice;
-$("teach").onclick = teach;
 $("save").onclick = savePending;
 $("stop").onclick = () => { stopSpeaking(); };
 $("light").onclick = async () => {
