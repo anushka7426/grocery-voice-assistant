@@ -2,7 +2,7 @@
 // reader and the camera model (large) are cached the first time they are used while online.
 // Open Food Facts requests are never cached here (app code caches results itself).
 
-const VERSION = "gva-v5";
+const VERSION = "gva-v6";
 const SHELL = [
   "./", "index.html", "styles.css", "manifest.webmanifest",
   "js/app.js", "js/scanner.js", "js/lookup.js", "js/describe.js", "js/speech.js",

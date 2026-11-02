@@ -10,14 +10,32 @@
     "8901063139374": {
       "name": "Bourbon biscuits",
       "brand": "Britannia",
-      "quantity": "",
-      "source": "your test photo; add pack size after checking the pack"
+      "quantity": "10g",
+      "source": "added in the app by the project owner",
+      "mrp": "10",
+      "diet": "vegetarian"
     },
     "8901058017687": {
       "name": "Maggi Masala Noodles",
       "brand": "Maggi, Nestle India",
       "quantity": "70 g",
       "source": "your test photo of the pack"
+    },
+    "4987176191205": {
+      "name": "Vicks VapoRub",
+      "brand": "Vicks",
+      "quantity": "25ml",
+      "mrp": "99",
+      "diet": "unknown",
+      "source": "added in the app by the project owner"
+    },
+    "8902346012360": {
+      "name": "Electral ORS Oral Rehydration Salts I.P.",
+      "brand": "Electral",
+      "quantity": "4.4g",
+      "mrp": "4.68",
+      "diet": "vegetarian",
+      "source": "added in the app by the project owner"
     }
   },
   "prefixes": {
