@@ -10,9 +10,11 @@ A phone web app that helps blind and low-vision shoppers identify Indian grocery
 2. **Lookup (offline first)** - products you taught the app, then `docs/data/products-in.json`, then results cached from earlier scans, then Open Food Facts when online.
 3. **Front-of-pack reader** - if the barcode is not in any database, the app asks you to turn the pack to the front, then reads it with an on-device text reader (PaddleOCR PP-OCRv4 via onnxruntime-web; Tesseract is the fallback). `identify.js` works out brand, product type (oil, oats, namkeen...) and name from the text, and pulls out price, net quantity and best-before. **Save** stores the barcode with that name on the phone so it is recognised instantly next time, offline.
 4. **Visual recognition (fallback)** - the trained YOLOv8n model (`docs/model/grocery.onnx`, 25 products) runs on the phone via onnxruntime-web. It is a closed-set detector and *will* label unknown packs as one of its 25 classes, so a guess is spoken only if the text read from the pack agrees with it, or (when no text can be read) if it is stable over 3 frames, and then only as "may be ... please confirm".
-5. **Voice** - the phone's speech engine; follow-up questions (ingredients, allergens, nutrition, vegetarian) by button or voice.
+5. **Voice** - the phone's speech engine; follow-up questions (nutrition, vegetarian, size, price) by button or voice.
 
-Missing data is always reported as "not available", never as "none" (important for allergens).
+Missing data is always reported as "not available".
+
+The app does not read out ingredients or allergens, so it must not be relied on for allergy safety.
 
 ## Run locally
 
@@ -25,9 +27,19 @@ The camera needs HTTPS on a real phone: publish with GitHub Pages (Settings > Pa
 
 ## Add products
 
-- **In the app:** after an unknown scan tap *Add details or correct the name* (name, brand, pack size, price, ingredients, allergens, vegetarian). You can type each field or tap *Say it* to dictate. *Settings > Add a product by hand* adds one without scanning, and *Edit this product* corrects any product. *Settings > My saved products* lists, edits and deletes them, and exports or imports a backup file.
+- **In the app:** after an unknown scan tap *Add details or correct the name* (name, brand, pack size, price, vegetarian). You can type each field or tap *Say it* to dictate. *Settings > Add a product by hand* adds one without scanning, and *Edit this product* corrects any product. *Settings > My saved products* lists, edits and deletes them, and exports or imports a backup file.
 - **Saved products live on that phone only.** Use the backup file to move them to another phone, or merge the `products` entries from it into `docs/data/products-in.json` so every user gets them.
-- Leave allergens empty if unknown (the app then says "not available"); type `none` only if the pack says there are no allergens.
+
+## Teach it your products (train on your own photos)
+
+The built-in model only knows 25 Pakistani-market products, so for everything else you can train a small model on photos taken inside the app:
+
+1. Scan a product, then tap **Take training photos**. Hold the pack in front of the camera and turn it slowly (20 photos, about 20 seconds). Repeat in a different place or light. Use **Settings > Other things** to photograph things that are *not* your products (other packs, shelves, hands, empty backgrounds); this lets the model say "I don't know".
+2. Open **Saved products > Export training data** to get `training-data.zip`.
+3. On a computer with Python: `pip install ultralytics`, then `python training/train_products.py training-data.zip`.
+4. Copy `products-cls.onnx` and `products-cls.json` into `docs/model/`, commit, push. The app uses them automatically and asks you to confirm before trusting a result.
+
+Aim for 40+ photos per product in at least 2 sessions and 100+ "other" photos. See `training/README.md`. The pipeline is tested end to end on synthetic data only; real accuracy depends on your photos.
 
 ## Python prototype
 

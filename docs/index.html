@@ -30,8 +30,6 @@
   </div>
 
   <div id="followups" class="grid" hidden>
-    <button id="ing">Ingredients</button>
-    <button id="all">Allergens</button>
     <button id="nut">Nutrition</button>
     <button id="veg">Vegetarian?</button>
   </div>
@@ -39,6 +37,7 @@
   <button id="save" class="big primary" hidden>Save</button>
   <button id="teach" class="big" hidden>Add details or correct the name</button>
   <button id="edit" class="big" hidden>Edit this product</button>
+  <button id="photos" class="big" hidden>Take training photos of this product</button>
 
   <details class="settings">
     <summary>Settings</summary>
@@ -51,6 +50,9 @@
     <div class="row">
       <button id="addManual">Add a product by hand</button>
       <button id="mine">My saved products</button>
+      <button id="otherPhotos">Take photos of other things (not a product)</button>
+      <button id="galleryPhotos">Add photos from the gallery</button>
+      <input type="file" id="galleryFile" accept="image/*" multiple hidden>
     </div>
     <label class="check"><input type="checkbox" id="sr"> Use my screen reader (TalkBack or VoiceOver) instead of the app voice</label>
   </details>
@@ -70,11 +72,6 @@
       <span class="field"><input id="fQty" autocomplete="off" placeholder="for example 70 g"><button type="button" class="say" data-for="fQty">Say it</button></span></label>
     <label>Price in rupees
       <span class="field"><input id="fMrp" inputmode="decimal" autocomplete="off" placeholder="for example 10"><button type="button" class="say" data-for="fMrp">Say it</button></span></label>
-    <label>Ingredients
-      <span class="field"><input id="fIng" autocomplete="off"><button type="button" class="say" data-for="fIng">Say it</button></span></label>
-    <label>Allergens, separated by commas
-      <span class="field"><input id="fAll" autocomplete="off" placeholder="for example milk, nuts"><button type="button" class="say" data-for="fAll">Say it</button></span></label>
-    <p class="hint">Leave allergens empty if you do not know. Type none only if the pack says it has no allergens.</p>
     <label>Vegetarian
       <select id="fDiet"><option value="unknown">Not sure</option><option value="vegetarian">Vegetarian (green dot)</option><option value="non-vegetarian">Non-vegetarian (brown dot)</option></select></label>
     <div class="row">
@@ -89,6 +86,7 @@
   <p id="mineCount"></p>
   <ul id="mineList"></ul>
   <div class="row">
+    <button id="exportTrain">Export training data</button>
     <button id="exportBtn">Export a backup file</button>
     <button id="importBtn">Import a backup file</button>
     <input type="file" id="importFile" accept="application/json,.json" hidden>
