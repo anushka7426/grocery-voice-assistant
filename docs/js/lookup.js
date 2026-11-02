@@ -109,13 +109,24 @@ function normaliseLocal(b) {
   return {
     name: b.name || "", brand: b.brand || "", quantity: b.quantity || "",
     ingredients: b.ingredients || "", allergens: b.allergens ?? null,
-    traces: null, nutrition: b.nutrition || null, diet: b.diet || "unknown",
+    traces: null, nutrition: b.nutrition || null, diet: b.diet || "unknown", mrp: b.mrp || "",
     source: b.source || "built-in list",
   };
 }
 
 export async function saveCustom(rawCode, product) {
   await store.put("custom", normalise(rawCode), product);
+}
+
+export async function deleteCustom(rawCode) {
+  await store.del("custom", normalise(rawCode));
+}
+
+/** Products saved on this phone: [{code, ...product}] */
+export async function listCustom() {
+  const k = (await store.keys("custom")) || [];
+  const v = (await store.all("custom")) || [];
+  return k.map((code, i) => ({ code, ...v[i] }));
 }
 
 /** Every known product name/brand, for matching text read from a label. */

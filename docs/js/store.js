@@ -38,3 +38,4 @@ export const get = (s, k) => tx(s, "readonly", (o) => o.get(k));
 export const put = (s, k, v) => tx(s, "readwrite", (o) => o.put(v, k));
 export const all = (s) => tx(s, "readonly", (o) => o.getAll());
 export const keys = (s) => tx(s, "readonly", (o) => o.getAllKeys());
+export const del = (s, k) => tx(s, "readwrite", (o) => o.delete(k));
