@@ -11,7 +11,6 @@ import { normalise } from "./gtin.js";
 const OFF = "https://world.openfoodfacts.org/api/v2/product/";
 const FIELDS = [
   "product_name", "product_name_en", "generic_name", "brands", "quantity",
-  "ingredients_text", "ingredients_text_en", "allergens_tags", "traces_tags",
   "nutriments", "ingredients_analysis_tags", "categories",
 ].join(",");
 
@@ -27,7 +26,6 @@ async function loadBundled() {
 }
 
 const clean = (s) => (s || "").toString().replace(/\s+/g, " ").trim();
-const tagName = (t) => clean(t.replace(/^[a-z]{2}:/, "").replace(/-/g, " "));
 
 function fromOFF(p) {
   const tags = p.ingredients_analysis_tags || [];
@@ -49,9 +47,6 @@ function fromOFF(p) {
     name: clean(p.product_name_en || p.product_name || p.generic_name),
     brand: clean(p.brands).split(",")[0] || "",
     quantity: clean(p.quantity),
-    ingredients: clean(p.ingredients_text_en || p.ingredients_text),
-    allergens: Array.isArray(p.allergens_tags) ? p.allergens_tags.map(tagName) : null,
-    traces: Array.isArray(p.traces_tags) ? p.traces_tags.map(tagName) : null,
     nutrition: hasNutrition ? nutrition : null,
     diet,
     source: "Open Food Facts",
@@ -108,10 +103,22 @@ export async function lookup(rawCode) {
 function normaliseLocal(b) {
   return {
     name: b.name || "", brand: b.brand || "", quantity: b.quantity || "",
-    ingredients: b.ingredients || "", allergens: b.allergens ?? null,
-    traces: null, nutrition: b.nutrition || null, diet: b.diet || "unknown", mrp: b.mrp || "",
+    nutrition: b.nutrition || null, diet: b.diet || "unknown", mrp: b.mrp || "",
     source: b.source || "built-in list",
   };
+}
+
+/** Same as lookup() but never touches the network. */
+export async function lookupLocal(rawCode) {
+  const db = await loadBundled();
+  for (const c of [normalise(rawCode), rawCode]) {
+    const mine = await store.get("custom", c);
+    if (mine) return mine;
+    if (db.products[c]) return normaliseLocal(db.products[c]);
+    const cached = await store.get("cache", c);
+    if (cached) return cached;
+  }
+  return undefined;
 }
 
 export async function saveCustom(rawCode, product) {

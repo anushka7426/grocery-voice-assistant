@@ -1,5 +1,5 @@
 // Turns a product record into speech, and answers follow-up questions.
-// Safety rule: missing data is reported as "not available", never as "none".
+// Missing data is reported as "not available".
 
 const sentence = (s) => (/[.!?]$/.test(s) ? s : s + ".");
 
@@ -9,27 +9,13 @@ export function summary(p) {
   if (p.quantity) out.push(`Pack size ${p.quantity}`);
   if (p.mrp) out.push(`Price ${p.mrp} rupees`);
   if (p.diet === "vegetarian") out.push("Marked vegetarian in the database");
-  else if (p.diet === "non-vegetarian") out.push("Warning: contains non-vegetarian ingredients");
-  if (p.allergens && p.allergens.length) out.push(`Contains allergens: ${p.allergens.join(", ")}`);
-  out.push("Say ingredients, allergens, nutrition, or repeat, for more");
+  else if (p.diet === "non-vegetarian") out.push("Warning: this product is marked non-vegetarian");
+  out.push("Say nutrition, vegetarian, price, or repeat, for more");
   return out.map(sentence).join(" ");
 }
 
 export function answer(intent, p) {
   switch (intent) {
-    case "ingredients":
-      return p.ingredients
-        ? sentence(`Ingredients: ${p.ingredients}`)
-        : "Ingredients are not available for this product. Please check the pack.";
-    case "allergens": {
-      if (p.allergens === null || p.allergens === undefined)
-        return "Allergen information is not available for this product. Please check the pack. Do not assume it is allergen free.";
-      const a = p.allergens.length
-        ? `Contains allergens: ${p.allergens.join(", ")}.`
-        : "No allergens are listed in the database, but the data may be incomplete. Please check the pack if you have an allergy.";
-      const t = p.traces && p.traces.length ? ` May contain traces of ${p.traces.join(", ")}.` : "";
-      return a + t;
-    }
     case "nutrition": {
       const n = p.nutrition;
       if (!n) return "Nutrition information is not available for this product.";
@@ -63,9 +49,7 @@ export function answer(intent, p) {
 
 // Order matters: the first rule that matches wins.
 const RULES = [
-  ["allergens", /allerg|gluten|milk|dairy|soy|wheat|\begg|peanut|\bnuts?\b/],
   ["price", /price|cost|\bmrp\b|rupee|how much (money|does)/],
-  ["ingredients", /ingredient|made of|contain|what is in|what's in/],
   ["nutrition", /nutri|calor|sugar|\bfat\b|protein|\bsalt\b|carb|energy|healthy/],
   ["diet", /\bveg|non.?veg|meat/],
   ["size", /size|quantity|weight|grams|how (much|big)/],

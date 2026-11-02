@@ -8,11 +8,12 @@ function open() {
   if (!dbPromise) {
     dbPromise = new Promise((resolve, reject) => {
       try {
-        const req = indexedDB.open(DB, 1);
+        const req = indexedDB.open(DB, 2);
         req.onupgradeneeded = () => {
           const db = req.result;
-          db.createObjectStore("cache");   // products fetched online
-          db.createObjectStore("custom");  // products the user taught the app
+          for (const name of ["cache", "custom", "photos"]) {   // fetched products, taught products, training photos
+            if (!db.objectStoreNames.contains(name)) db.createObjectStore(name);
+          }
         };
         req.onsuccess = () => resolve(req.result);
         req.onerror = () => reject(req.error);

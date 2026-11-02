@@ -1,5 +1,6 @@
 import { Scanner } from "./scanner.js";
-import { lookup, saveCustom, deleteCustom, listCustom, allKnown } from "./lookup.js";
+import { lookup, lookupLocal, saveCustom, deleteCustom, listCustom, allKnown } from "./lookup.js";
+import * as photos from "./photos.js";
 import { summary, answer, parseIntent } from "./describe.js";
 import { speak, stopSpeaking, beep, buzz, bindLive, getSettings, setRate, setScreenReaderMode } from "./speech.js";
 import { isIndian } from "./gtin.js";
@@ -18,6 +19,7 @@ let pendingSave = null;      // { code, name, brand, quantity } from the last fr
 
 bindLive($("transcript"));
 const setStatus = (t) => { status.textContent = t; };
+const showPhotoButton = () => { $("photos").hidden = !(current || lastMiss); };
 const digits = (c) => c.split("").join(" ");
 
 // ------------------------------------------------------------ guidance
@@ -60,6 +62,7 @@ async function start() {
   armHints();
   setTimeout(() => import("./ppocr.js").then((m) => navigator.onLine && m.warmUp()), 4000);
   setTimeout(() => import("./vision.js").then((m) => navigator.onLine && m.warmUp()), 9000);
+  setTimeout(() => import("./classifier.js").then((m) => m.warmUp()), 12000);
 }
 
 async function handleCode(code) {
@@ -73,13 +76,13 @@ async function handleCode(code) {
   const res = await lookup(code);
   if (res.status === "found") {
     current = { code, product: res.product };
-    lastMiss = null;
+    lastMiss = null; showPhotoButton();
     const text = summary(res.product);
     setStatus(`${res.product.name} — ${res.product.source}`);
     $("followups").hidden = false; $("teach").hidden = true; $("edit").hidden = false;
     await speak(text);
   } else {
-    lastMiss = code;
+    lastMiss = code; showPhotoButton();
     $("teach").hidden = false;
     const india = isIndian(code) ? "It is an Indian barcode. " : "";
     const brand = res.hint ? `The maker prefix suggests ${res.hint}, but I can't be sure of the product. ` : "";
@@ -145,6 +148,8 @@ async function readFront({ code = null, wait = 0 } = {}) {
     const known = ocr.matchKnown(text, await allKnown());
     if (known) parts.push(`This matches ${known.brand ? known.brand + " " : ""}${known.name} in my list`);
 
+    const mine = await recogniseMine(shot);
+    if (mine) parts.unshift(mine);
     const seen = await visualGuess(shot, text);
     if (seen) parts.push(seen);
 
@@ -200,18 +205,75 @@ async function visualGuess(shot, text) {
   return `I cannot read the text, but the camera thinks this may be ${name}. My camera model only knows a small set of products and can be wrong, so please confirm with someone before relying on it`;
 }
 
+// The classifier trained on YOUR photos (optional; see training/README.md).
+async function recogniseMine(shot) {
+  let cls;
+  try { cls = await import("./classifier.js"); } catch { return ""; }
+  let r;
+  try { r = await cls.classify(shot); } catch { return ""; }
+  if (!r || !r.accepted) return "";
+  const code = r.top.code;
+  const product = (await lookupLocal(code)) || { name: r.top.info.name, brand: r.top.info.brand, quantity: r.top.info.quantity, mrp: r.top.info.mrp, diet: r.top.info.diet };
+  if (!product.name) return "";
+  current = { code, product: { nutrition: null, ...product } };
+  showPhotoButton(); $("followups").hidden = false; $("edit").hidden = false;
+  return `The camera recognises your saved product. ${summary(current.product).replace(/\s*Say nutrition.*$/, "")} I am ${Math.round(r.top.conf * 100)} percent sure, please confirm`;
+}
+
+// ------------------------------------------------------------ training photos
+const PHOTOS = 20;
+async function takePhotos(code, label, n = PHOTOS) {
+  if (!scanner || busy) return;
+  busy = true; clearHints(); scanner.pause();
+  const session = photos.newSession();
+  const prompts = {
+    0: code === photos.OTHER ? "Point the camera at something that is not one of your products. Move around slowly." : "Hold the front of the pack toward the camera.",
+    5: code === photos.OTHER ? "Now something else, or another angle." : "Turn it a little to the left.",
+    10: code === photos.OTHER ? "Keep going. Packs, shelves, tables, hands." : "Now show the back.",
+    15: code === photos.OTHER ? "Almost done." : "Tilt it up and move it a little closer.",
+  };
+  setStatus(`Taking ${n} photos of ${label}…`);
+  await speak(`Taking ${n} photos of ${label}. I will beep for each one.`);
+  for (let i = 0; i < n; i++) {
+    if (prompts[i]) await speak(prompts[i]);
+    try { await photos.addPhoto(code, session, i, scanner.snapshot(800)); beep("tick"); } catch { /* storage full or camera gone */ }
+    await new Promise((r) => setTimeout(r, 1000));
+  }
+  const total = (await photos.counts())[code] || 0;
+  beep("ok"); buzz(120);
+  setStatus(`${total} photos saved for ${label}.`);
+  await speak(`Done. ${total} photos of ${label} are saved on this phone. For best results take another set later in a different place or light.`);
+  busy = false; scanner.resume(); armHints();
+}
+$("photos").onclick = () => {
+  const code = current?.code || lastMiss;
+  const name = current?.product?.name || "this product";
+  if (!code) { speak("Scan a product first."); return; }
+  takePhotos(code, name);
+};
+$("otherPhotos").onclick = () => takePhotos(photos.OTHER, "other things", 30);
+$("galleryPhotos").onclick = () => $("galleryFile").click();
+$("galleryFile").onchange = async (e) => {
+  const files = [...e.target.files]; e.target.value = "";
+  if (!files.length) return;
+  const code = current?.code || lastMiss;
+  if (!code) { speak("Scan or select a product first, so I know which product these photos show."); return; }
+  const n = await photos.addFiles(code, files);
+  speak(`Added ${n} photos to ${current?.product?.name || "this product"}.`);
+};
+
 async function savePending() {
   if (!pendingSave) { speak("There is nothing to save."); return; }
   const p = pendingSave;
-  await commitProduct(p.code, { name: p.name, brand: p.brand, quantity: p.quantity, mrp: p.mrp || "", ingredients: "", allergens: null, diet: "unknown" });
+  await commitProduct(p.code, { name: p.name, brand: p.brand, quantity: p.quantity, mrp: p.mrp || "", diet: "unknown" });
 }
 
 /** Store a product on this phone and make it the current one. */
 async function commitProduct(code, rec) {
-  const product = { traces: null, nutrition: null, ...rec };
+  const product = { nutrition: null, ...rec };
   await saveCustom(code, product);
   current = { code, product: { ...product, source: "saved on this phone" } };
-  pendingSave = null; lastMiss = null;
+  pendingSave = null; lastMiss = null; showPhotoButton();
   $("save").hidden = true; $("teach").hidden = true; $("edit").hidden = false; $("followups").hidden = false;
   setStatus(`${product.name} — saved on this phone`);
   await speak(`Saved as ${product.name}. Next time this barcode is scanned I will say it straight away, even without internet.`);
@@ -245,28 +307,19 @@ function askByVoice() {
     if (/scan|next/i.test(said)) { scanner.resume(); return speak("Scanning."); }
     const intent = alts.map(parseIntent).find(Boolean);
     if (intent) await ask(intent);
-    else await speak(`I heard ${said}. You can ask about ingredients, allergens, nutrition, vegetarian, size, or say read label.`);
+    else await speak(`I heard ${said}. You can ask about nutrition, vegetarian, size, price, or say read label.`);
   });
 }
 
 // ------------------------------------------------------------ add / edit a product
 const F = (id) => $(id);
-const allergenText = (a) => (a === null || a === undefined ? "" : a.length ? a.join(", ") : "none");
-const parseAllergens = (t) => {
-  t = t.trim();
-  if (!t) return null;                                  // unknown, never "none"
-  if (/^(none|no|nil)$/i.test(t)) return [];
-  return t.split(/,|;|\band\b/i).map((x) => x.trim().toLowerCase()).filter(Boolean);
-};
-
 /** Open the product form. `code` is the barcode, `p` an optional product to prefill/edit. */
 function openForm(code, p = {}, { manual = false } = {}) {
   scanner?.pause(); clearHints();
   F("fCode").value = code || "";
   F("fCode").readOnly = !manual;
   F("fName").value = p.name || ""; F("fBrand").value = p.brand || ""; F("fQty").value = p.quantity || "";
-  F("fMrp").value = p.mrp || ""; F("fIng").value = p.ingredients || "";
-  F("fAll").value = allergenText(p.allergens); F("fDiet").value = p.diet || "unknown";
+  F("fMrp").value = p.mrp || ""; F("fDiet").value = p.diet || "unknown";
   F("dlgTitle").textContent = manual ? "Add a product" : p.source === "saved on this phone" ? "Edit this product" : "Save this product";
   $("dlg").showModal();
   (manual ? F("fCode") : F("fName")).focus();
@@ -308,7 +361,7 @@ $("teachForm").onsubmit = async (e) => {
   $("dlg").close();
   await commitProduct(code, {
     name, brand: F("fBrand").value.trim(), quantity: F("fQty").value.trim(), mrp: F("fMrp").value.trim(),
-    ingredients: F("fIng").value.trim(), allergens: parseAllergens(F("fAll").value), diet: F("fDiet").value,
+    diet: F("fDiet").value,
   });
   scanner?.resume(); armHints();
 };
@@ -317,22 +370,52 @@ $("teachForm").onsubmit = async (e) => {
 async function showMine() {
   scanner?.pause(); clearHints();
   const items = await listCustom();
-  $("mineCount").textContent = items.length ? `${items.length} saved on this phone.` : "Nothing saved yet.";
+  const pc = await photos.counts();
+  $("mineCount").textContent = (items.length ? `${items.length} saved on this phone.` : "Nothing saved yet.") + ` Training photos: ${Object.values(pc).reduce((a, b) => a + b, 0)}.`;
   const ul = $("mineList"); ul.textContent = "";
   for (const it of items) {
     const li = document.createElement("li");
-    li.append(`${it.name}${it.brand ? " — " + it.brand : ""} (${it.code})`);
+    li.append(`${it.name}${it.brand ? " — " + it.brand : ""} (${it.code}) — ${pc[it.code] || 0} photos`);
     const row = document.createElement("div"); row.className = "row";
     const ed = document.createElement("button"); ed.textContent = "Edit"; ed.setAttribute("aria-label", `Edit ${it.name}`);
     ed.onclick = () => { $("mineDlg").close(); openForm(it.code, { ...it, source: "saved on this phone" }); };
     const rm = document.createElement("button"); rm.textContent = "Delete"; rm.setAttribute("aria-label", `Delete ${it.name}`);
-    rm.onclick = async () => { await deleteCustom(it.code); if (current?.code === it.code) current = null; speak(`Deleted ${it.name}.`); showMine(); };
-    row.append(ed, rm); li.append(row); ul.append(li);
+    rm.onclick = async () => { await deleteCustom(it.code); if (current?.code === it.code) current = null; showPhotoButton(); speak(`Deleted ${it.name}.`); showMine(); };
+    const ph = document.createElement("button"); ph.textContent = "Delete photos"; ph.setAttribute("aria-label", `Delete training photos of ${it.name}`);
+    ph.onclick = async () => { await photos.deletePhotos(it.code); speak(`Deleted photos of ${it.name}.`); showMine(); };
+    row.append(ed, rm, ph); li.append(row); ul.append(li);
+  }
+  // products that have photos but are not saved by hand (built-in or found online)
+  const savedCodes = new Set(items.map((i) => i.code));
+  for (const code of Object.keys(pc)) {
+    if (code === photos.OTHER || savedCodes.has(code)) continue;
+    const info = (await lookupLocal(code)) || {};
+    const li = document.createElement("li"); li.append(`${info.name || "Unnamed product"} (${code}) — ${pc[code]} photos`);
+    const row = document.createElement("div"); row.className = "row";
+    const d = document.createElement("button"); d.textContent = "Delete photos";
+    d.onclick = async () => { await photos.deletePhotos(code); showMine(); };
+    row.append(d); li.append(row); ul.append(li);
+  }
+  if (pc[photos.OTHER]) {
+    const li = document.createElement("li"); li.append(`Other things (not a product) — ${pc[photos.OTHER]} photos`);
+    const row = document.createElement("div"); row.className = "row";
+    const d = document.createElement("button"); d.textContent = "Delete photos";
+    d.onclick = async () => { await photos.deletePhotos(photos.OTHER); showMine(); };
+    row.append(d); li.append(row); ul.append(li);
   }
   if (!$("mineDlg").open) $("mineDlg").showModal();
 }
 $("mine").onclick = showMine;
 $("mineClose").onclick = () => { $("mineDlg").close(); scanner?.resume(); armHints(); };
+$("exportTrain").onclick = async () => {
+  const r = await photos.exportDataset(lookupLocal);
+  if (!r) { speak("There are no training photos yet. Scan a product and tap Take training photos."); return; }
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(r.blob); a.download = "training-data.zip"; a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 4000);
+  $("mineCount").textContent = `Exported ${r.photos} photos of ${r.classes} classes. ${r.notes.length ? r.notes.join(" ") : ""}`;
+  speak(`Training file created with ${r.photos} photos of ${r.classes} classes. Copy it to your computer and run the training script.${r.notes.length ? " " + r.notes.length + " things to improve are written in the file." : ""}`);
+};
 $("exportBtn").onclick = async () => {
   const items = await listCustom();
   const products = {};
@@ -352,7 +435,7 @@ $("importFile").onchange = async (e) => {
     let n = 0;
     for (const [code, p] of Object.entries(data.products || {})) {
       if (!/^\d{6,14}$/.test(code) || !p || typeof p.name !== "string" || !p.name.trim()) continue;
-      await saveCustom(code, { traces: null, nutrition: null, ingredients: "", allergens: null, diet: "unknown", ...p });
+      await saveCustom(code, { nutrition: null, diet: "unknown", ...p });
       n++;
     }
     speak(`Imported ${n} products.`); showMine();
@@ -371,8 +454,6 @@ $("go").onclick = start;
 $("retry").onclick = start;
 $("again").onclick = () => { scanner.resume(); busy = false; speak("Scanning."); armHints(); };
 $("repeat").onclick = () => ask("repeat");
-$("ing").onclick = () => ask("ingredients");
-$("all").onclick = () => ask("allergens");
 $("nut").onclick = () => ask("nutrition");
 $("veg").onclick = () => ask("diet");
 $("label").onclick = readLabel;
