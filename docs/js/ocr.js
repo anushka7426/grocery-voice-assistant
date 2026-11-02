@@ -35,13 +35,23 @@ function enhance(src) {
   return c;
 }
 
+/**
+ * Read the text on a pack. Uses PaddleOCR (ppocr.js); falls back to Tesseract
+ * if that cannot load. @returns {{text:string, lines:{text:string,conf:number,h:number}[], engine:string}}
+ */
 export async function readLabel(canvas) {
-  const w = await getWorker();
-  const { data } = await w.recognize(enhance(canvas));
-  const lines = (data.lines || [])
-    .filter((l) => l.confidence >= 55 && /[A-Za-z0-9]{3,}/.test(l.text))
-    .map((l) => l.text.replace(/\s+/g, " ").trim());
-  return { text: lines.join("\n"), lines };
+  try {
+    const { readText } = await import("./ppocr.js");
+    const lines = await readText(canvas);
+    return { text: lines.map((l) => l.text).join("\n"), lines, engine: "paddle" };
+  } catch {
+    const w = await getWorker();
+    const { data } = await w.recognize(enhance(canvas));
+    const lines = (data.lines || [])
+      .filter((l) => l.confidence >= 55 && /[A-Za-z0-9]{3,}/.test(l.text))
+      .map((l) => ({ text: l.text.replace(/\s+/g, " ").trim(), conf: l.confidence / 100, h: l.bbox.y1 - l.bbox.y0 }));
+    return { text: lines.map((l) => l.text).join("\n"), lines, engine: "tesseract" };
+  }
 }
 
 export function extractFacts(text) {
@@ -49,6 +59,11 @@ export function extractFacts(text) {
   const flat = text.replace(/\n/g, " ");
   const mrp = flat.match(/(?:M\.?\s?R\.?\s?P\.?|Rs\.?|₹|INR)[^0-9]{0,25}(\d{1,5}(?:[.,]\d{1,2})?)/i);
   if (mrp) facts.mrp = mrp[1].replace(",", ".");
+  else {
+    // front-of-pack price flashes such as "ONLY Rs 10/-" or "10/-"
+    const flash = flat.match(/(?:only|rs\.?|₹)\s*[^0-9]{0,4}(\d{1,4})\s*\/\s*-/i) || flat.match(/\b(\d{1,4})\s*\/\s*-/);
+    if (flash) facts.mrp = flash[1];
+  }
   const bb = flat.match(/(best\s*before|use\s*by|expiry(?:\s*date)?|exp\.?)\s*[:\-]?\s*([^.\n]{3,40})/i);
   if (bb) facts.bestBefore = `${bb[1].toLowerCase()} ${bb[2].trim()}`;
   const q = flat.match(/net\s*(?:quantity|qty|weight|wt\.?)\s*[:\-]?\s*(\d+(?:\.\d+)?\s*(?:g|gm|kg|ml|l)\b)/i);

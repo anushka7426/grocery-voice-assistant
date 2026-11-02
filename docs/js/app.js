@@ -14,6 +14,7 @@ let lastMiss = null;         // barcode that wasn't found (for "teach")
 let recent = { code: "", t: 0 };
 let hintTimers = [];
 let busy = false;
+let pendingSave = null;      // { code, name, brand, quantity } from the last front-of-pack read
 
 bindLive($("transcript"));
 const setStatus = (t) => { status.textContent = t; };
@@ -57,7 +58,7 @@ async function start() {
   keepAwake();
   await speak("Ready. Point the barcode at the camera and hold steady. Say or tap read label if there is no barcode.");
   armHints();
-  setTimeout(() => import("./ocr.js").then((m) => navigator.onLine && m.warmUp()), 4000);
+  setTimeout(() => import("./ppocr.js").then((m) => navigator.onLine && m.warmUp()), 4000);
   setTimeout(() => import("./vision.js").then((m) => navigator.onLine && m.warmUp()), 9000);
 }
 
@@ -85,49 +86,85 @@ async function handleCode(code) {
     const why = res.status === "offline"
       ? "There is no internet and this product is not saved on the phone. "
       : "This product is not in my database. ";
-    const msg = `Barcode ${digits(code)}. ${india}${why}${brand}Say or tap read label to read the printed text, or teach this product.`;
-    setStatus(`Barcode ${code} not found.`);
+    const msg = `${india}${why}${brand}Now turn the pack so the front faces the camera and hold it steady. I will read it in 4 seconds.`;
+    setStatus(`Barcode ${code} not found. Show the front of the pack.`);
     beep("fail"); buzz([80, 60, 80]);
     await speak(msg);
+    busy = false;
+    await readFront({ code, wait: 4 });
+    return;
   }
   busy = false;
   scanner.resume();          // hands-free: keep scanning for the next item
   armHints();
 }
 
-async function readLabel() {
+// Read the FRONT of the pack: text reader (PaddleOCR) -> brand/type/title, plus the
+// camera model as a cross-check. `code` is set when we arrive here from an unknown barcode.
+async function readFront({ code = null, wait = 0 } = {}) {
   if (!scanner || busy) return;
   busy = true; clearHints(); scanner.pause();
-  setStatus("Reading the label. Hold steady.");
-  await speak("Reading the label. Hold steady.");
+  $("save").hidden = true; pendingSave = null;
   try {
-    const ocr = await import("./ocr.js");
-    const shot = scanner.snapshot();
-    let text = "";
-    try { text = (await ocr.readLabel(shot)).text; } catch { /* text reader unavailable: still try the camera model */ }
-    const parts = [];
-    let body = "";
-    if (text.trim()) {
-      const f = ocr.extractFacts(text);
-      if (f.mrp) parts.push(`M R P ${f.mrp} rupees`);
-      if (f.net) parts.push(`Net quantity ${f.net}`);
-      if (f.bestBefore) parts.push(f.bestBefore);
-      const guess = ocr.matchKnown(text, await allKnown());
-      if (guess) parts.push(`The text looks like ${guess.brand ? guess.brand + " " : ""}${guess.name}. This is only a guess, please confirm`);
-      body = text.replace(/\n/g, ". ").slice(0, 450);
-      $("transcript").dataset.ocr = text;
+    if (wait) {                                        // time to turn the pack around
+      for (let i = wait; i > 0; i--) { beep("tick"); await new Promise((r) => setTimeout(r, 1000)); }
+      beep("ok");
     }
-    const seen = await visualGuess(shot, text);
-    if (seen) parts.unshift(seen);
+    setStatus("Reading the pack. Hold steady.");
+    await speak("Reading. Hold steady.");
+    const ocr = await import("./ocr.js");
+    const id = await import("./identify.js");
 
-    if (!parts.length && !body) {
+    // up to two looks, 1 second apart; keep the one with more readable text
+    let best = null;
+    for (let i = 0; i < 2; i++) {
+      const shot = scanner.snapshot();
+      let r = { lines: [], text: "" };
+      try { r = await ocr.readLabel(shot); } catch { /* reader unavailable */ }
+      const score = r.lines.reduce((n, l) => n + l.text.length * l.conf, 0);
+      if (!best || score > best.score) best = { ...r, shot, score };
+      if (score > 120) break;                          // plenty of text already
+      if (i === 0) await new Promise((r2) => setTimeout(r2, 1000));
+    }
+    const { text, lines, shot } = best;
+    const who = id.identify(lines);
+    const facts = ocr.extractFacts(text);
+    const parts = [];
+
+    if (who.brand || who.title) {
+      const what = [who.brand, who.title].filter(Boolean).join(", ");
+      const kind = who.categories.length ? `, ${who.categories.join(" and ")}` : "";
+      parts.push(`This looks like ${what}${kind}`);
+    } else if (who.categories.length) {
+      parts.push(`This looks like a pack of ${who.categories.join(" and ")}`);
+    }
+    if (facts.mrp) parts.push(`Price printed ${facts.mrp} rupees`);
+    if (facts.net) parts.push(`Net quantity ${facts.net}`);
+    if (facts.bestBefore) parts.push(facts.bestBefore);
+
+    const known = ocr.matchKnown(text, await allKnown());
+    if (known) parts.push(`This matches ${known.brand ? known.brand + " " : ""}${known.name} in my list`);
+
+    const seen = await visualGuess(shot, text);
+    if (seen) parts.push(seen);
+
+    if (!parts.length) {
       beep("fail");
-      await speak("I could not identify this product or read any text. Try more light, hold the front of the pack steady, and try again.");
+      setStatus("Could not identify.");
+      await speak("I could not read enough text. Turn the pack so the front faces the camera, add more light, hold it about 20 centimetres away, and try again.");
     } else {
       beep("ok");
-      setStatus("Label read.");
-      const tail = body ? `Text I could read: ${body}. Text reading can make mistakes.` : "";
-      await speak(`${parts.length ? parts.join(". ") + ". " : ""}${tail}`);
+      setStatus(who.name || "Pack read.");
+      $("transcript").dataset.ocr = text;
+      const guess = who.name ? "I am not certain, please confirm. " : "";
+      let tail = "";
+      if (code && who.name) {
+        pendingSave = { code, name: who.name, brand: who.brand, quantity: facts.net || "" };
+        $("save").textContent = `Save as ${who.name}`;
+        $("save").hidden = false;
+        tail = ` Tap Save, or say save, to remember this barcode as ${who.name}.`;
+      }
+      await speak(`${parts.join(". ")}. ${guess}${tail}`.trim());
     }
   } catch {
     await speak("The label reader is not available right now. Please try again.");
@@ -136,6 +173,7 @@ async function readLabel() {
   scanner.resume();
   armHints();
 }
+const readLabel = () => readFront();
 
 // Camera-model guess, only ever spoken with a safeguard (see vision.js).
 async function visualGuess(shot, text) {
@@ -148,7 +186,7 @@ async function visualGuess(shot, text) {
   if (text.trim()) {
     // there is text on the pack: the guess must agree with it, else stay silent
     return vision.agreesWithText(top.index, text)
-      ? `The camera recognises ${name}, and the text on the pack agrees. Please check the pack size`
+      ? `The camera model also recognises ${name}, and the text agrees. Please check the pack size`
       : "";
   }
   // no readable text: accept only a stable guess over 3 frames, and say it is uncertain
@@ -159,6 +197,16 @@ async function visualGuess(shot, text) {
     if (!again || again.index !== top.index) return "";
   }
   return `I cannot read the text, but the camera thinks this may be ${name}. My camera model only knows a small set of products and can be wrong, so please confirm with someone before relying on it`;
+}
+
+async function savePending() {
+  if (!pendingSave) { speak("There is nothing to save."); return; }
+  const p = pendingSave;
+  await saveCustom(p.code, { name: p.name, brand: p.brand, quantity: p.quantity, ingredients: "", allergens: null, nutrition: null, diet: "unknown" });
+  current = { code: p.code, product: { name: p.name, brand: p.brand, quantity: p.quantity, allergens: null, nutrition: null, diet: "unknown", source: "saved on this phone" } };
+  pendingSave = null; lastMiss = null;
+  $("save").hidden = true; $("teach").hidden = true;
+  await speak(`Saved as ${p.name}. Next time this barcode is scanned I will say it straight away, even without internet.`);
 }
 
 // ------------------------------------------------------------ follow-ups
@@ -184,7 +232,8 @@ function askByVoice() {
   if (!SR) { speak("Voice questions are not supported in this browser. Use the buttons."); return; }
   listen(async (alts) => {
     const said = alts[0];
-    if (/read (the )?label|read text/i.test(said)) { readLabel(); return; }
+    if (/\b(save|yes|remember)\b/i.test(said) && pendingSave) { await savePending(); return; }
+    if (/read (the )?(label|front|pack)|read text/i.test(said)) { readLabel(); return; }
     if (/scan|next/i.test(said)) { scanner.resume(); return speak("Scanning."); }
     const intent = alts.map(parseIntent).find(Boolean);
     if (intent) await ask(intent);
@@ -241,6 +290,7 @@ $("veg").onclick = () => ask("diet");
 $("label").onclick = readLabel;
 $("mic").onclick = askByVoice;
 $("teach").onclick = teach;
+$("save").onclick = savePending;
 $("stop").onclick = () => { stopSpeaking(); };
 $("light").onclick = async () => {
   const ok = await scanner.setTorch(!scanner.torchOn);
