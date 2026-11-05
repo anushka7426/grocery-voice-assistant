@@ -28,3 +28,9 @@ Copy both files into `docs/model/`, commit, push, and merge. Reload the app: whe
 - Photos taken one second apart look almost identical. If a product has only one photo session, the validation score is inflated. Use two sessions in different places.
 - Test with a product the model has never seen, and with other packs, before relying on it.
 - Retrain whenever you add products; the app keeps your photos on the phone until you delete them.
+
+
+## Shelf mode scripts
+- `train_shelf_detector.py` trains a one-class "product" detector on SKU-110K and writes `docs/model/shelf-detector.onnx` + `.json`.
+- `export_embedder.py` writes `docs/model/embed.onnx` (already committed).
+- `build_refs.py` turns a folder of product photos into `docs/model/refs.json` so those products are recognised on the shelf.

@@ -22,11 +22,19 @@
   <p id="status" role="status">Starting…</p>
   <button id="retry" class="big" hidden>Retry camera</button>
 
-  <div class="grid">
+  <div class="grid" id="mainGrid">
     <button id="again" class="big primary">Scan next product</button>
     <button id="label" class="big">Read label text</button>
     <button id="repeat" class="big">Repeat</button>
     <button id="mic" class="big">Ask a question (voice)</button>
+  </div>
+
+  <button id="shelfOn" class="big">Scan a shelf (many products)</button>
+  <div id="shelfPanel" class="grid" hidden>
+    <button id="shelfDescribe" class="big primary">Describe the shelf</button>
+    <button id="shelfRead" class="big">Read the middle product</button>
+    <button id="shelfTeach" class="big">Teach this product</button>
+    <button id="shelfStop" class="big">Stop shelf mode</button>
   </div>
 
   <div id="followups" class="grid" hidden>

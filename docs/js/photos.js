@@ -15,7 +15,7 @@ export const OTHER = "other";
 const MAX_SIDE = 800;          // keep photos small: plenty for a 224 px classifier
 const QUALITY = 0.85;
 
-const key = (code, session, n) => `${code}|${session}|${String(n).padStart(3, "0")}`;
+export const key = (code, session, n) => `${code}|${session}|${String(n).padStart(3, "0")}`;
 
 function toBlob(canvas) {
   return new Promise((res) => canvas.toBlob(res, "image/jpeg", QUALITY));
@@ -64,6 +64,8 @@ export async function counts() {
 export async function deletePhotos(code) {
   const keys = (await store.keys("photos")) || [];
   for (const k of keys) if (String(k).startsWith(code + "|")) await store.del("photos", k);
+  const refKeys = (await store.keys("refs")) || [];
+  for (const k of refKeys) if (String(k).startsWith(code + "|")) await store.del("refs", k);
 }
 
 /**
