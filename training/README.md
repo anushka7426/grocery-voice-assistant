@@ -34,3 +34,9 @@ Copy both files into `docs/model/`, commit, push, and merge. Reload the app: whe
 - `train_shelf_detector.py` trains a one-class "product" detector on SKU-110K and writes `docs/model/shelf-detector.onnx` + `.json`.
 - `export_embedder.py` writes `docs/model/embed.onnx` (already committed).
 - `build_refs.py` turns a folder of product photos into `docs/model/refs.json` so those products are recognised on the shelf.
+
+## Getting more data for shelf mode (run on your computer)
+1. `python training/fetch_off_images.py --india 300` (or `--barcodes ...`, `--from-json my-products.json`) downloads front-of-pack photos from Open Food Facts into `photos/`.
+2. `python training/build_refs.py --photos photos --augment 3` makes `docs/model/refs.json`; augmentation makes studio photos look more like shelf crops. Keep refs.json under a few MB (about 1.7 KB per vector).
+3. Train the shelf detector on SKU-110K (`train_shelf_detector.py`), then photograph Indian shelves and run `prelabel_shelves.py --images <folder>`. Correct the boxes, then fine-tune with `--model runs/shelf/weights/best.pt --data indian_shelves/shelves.yaml --name shelf_india`.
+Studio photos help recognition but real shelf crops help more: add shelf crops with "Teach this product" in the app. Do not commit scraped images to the repo.
