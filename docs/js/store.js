@@ -8,10 +8,10 @@ function open() {
   if (!dbPromise) {
     dbPromise = new Promise((resolve, reject) => {
       try {
-        const req = indexedDB.open(DB, 2);
+        const req = indexedDB.open(DB, 3);
         req.onupgradeneeded = () => {
           const db = req.result;
-          for (const name of ["cache", "custom", "photos"]) {   // fetched products, taught products, training photos
+          for (const name of ["cache", "custom", "photos", "refs"]) {   // fetched products, taught products, training photos, reference vectors
             if (!db.objectStoreNames.contains(name)) db.createObjectStore(name);
           }
         };

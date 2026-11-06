@@ -4,6 +4,7 @@ import * as photos from "./photos.js";
 import { summary, answer, parseIntent } from "./describe.js";
 import { speak, stopSpeaking, beep, buzz, bindLive, getSettings, setRate, setScreenReaderMode } from "./speech.js";
 import { isIndian } from "./gtin.js";
+import { ShelfScanner, internalCode } from "./shelf.js";
 
 const $ = (id) => document.getElementById(id);
 const status = $("status");
@@ -15,6 +16,8 @@ let lastMiss = null;         // barcode that wasn't found (for "teach")
 let recent = { code: "", t: 0 };
 let hintTimers = [];
 let busy = false;
+let shelf = null;            // ShelfScanner while shelf mode is on
+let shelfTeach = null;       // { code, crops } while the form for a shelf-taught product is open
 let pendingSave = null;      // { code, name, brand, quantity } from the last front-of-pack read
 
 bindLive($("transcript"));
@@ -302,6 +305,8 @@ function askByVoice() {
   if (!SR) { speak("Voice questions are not supported in this browser. Use the buttons."); return; }
   listen(async (alts) => {
     const said = alts[0];
+    if (shelf && await shelfVoice(said)) return;
+    if (/\b(scan|look at|describe) (the )?shelf|shelf mode/i.test(said)) { startShelf(); return; }
     if (/\b(save|yes|remember)\b/i.test(said) && pendingSave) { await savePending(); return; }
     if (/read (the )?(label|front|pack)|read text/i.test(said)) { readLabel(); return; }
     if (/scan|next/i.test(said)) { scanner.resume(); return speak("Scanning."); }
@@ -348,7 +353,7 @@ document.querySelectorAll(".say").forEach((btn) => {
 });
 
 $("teachForm").onsubmit = async (e) => {
-  if (e.submitter?.value === "cancel") { $("dlg").close(); scanner?.resume(); armHints(); return; }
+  if (e.submitter?.value === "cancel") { $("dlg").close(); shelfTeach = null; if (!shelf) { scanner?.resume(); armHints(); } return; }
   const name = F("fName").value.trim();
   const code = F("fCode").value.replace(/\s+/g, "");
   if (!name || !/^\d{6,14}$/.test(code)) {
@@ -363,7 +368,8 @@ $("teachForm").onsubmit = async (e) => {
     name, brand: F("fBrand").value.trim(), quantity: F("fQty").value.trim(), mrp: F("fMrp").value.trim(),
     diet: F("fDiet").value,
   });
-  scanner?.resume(); armHints();
+  if (shelfTeach && shelfTeach.code === code) { await saveShelfCrops(code, shelfTeach.crops); shelfTeach = null; }
+  if (!shelf) { scanner?.resume(); armHints(); }
 };
 
 // ---- my saved products: list, edit, delete, backup
@@ -441,6 +447,120 @@ $("importFile").onchange = async (e) => {
     speak(`Imported ${n} products.`); showMine();
   } catch { speak("That file could not be read."); }
 };
+
+
+// ------------------------------------------------------------ shelf mode
+// Many products in view at once. The barcode scanner is paused while this runs.
+const shelfUi = (on) => {
+  $("shelfPanel").hidden = !on;
+  $("shelfOn").hidden = on;
+  $("mainGrid").hidden = on;
+};
+
+async function nameOfCode(code) {
+  const mine = await lookupLocal(code);
+  if (mine) return mine;
+  const { bundledInfo } = await import("./refs.js");
+  return (await bundledInfo(code)) || null;
+}
+
+async function startShelf() {
+  if (!scanner || shelf) return;
+  clearHints(); scanner.pause(); busy = true;
+  shelfUi(true);
+  setStatus("Shelf mode. Move the phone slowly along the shelf.");
+  await speak("Shelf mode. Hold the phone about an arm's length from the shelf and move it slowly. I will tell you what I see.");
+  const refs = await import("./refs.js");
+  const bmpBox = async (bmp) => {                       // crop training photos to the product so the shelf background is left out
+    try {
+      const v = await import("./vision.js");
+      if (!v.names().length) return null;
+      const d = await v.detect(bmp, { conf: 0.5, agnostic: true });
+      return d[0]?.box || null;
+    } catch { return null; }
+  };
+  const nIndexed = await refs.indexPhotos({ cropBox: bmpBox });
+  shelf = new ShelfScanner({
+    grab: (max) => scanner.snapshot(max),
+    say: (t, o) => speak(t, o),
+    nameOf: nameOfCode,
+  });
+  const ok = await shelf.start();
+  if (!ok) { stopShelf(false); return; }
+  if (!shelf.refs.length) await speak("I have no saved photos of products yet, so I can count products but not name them. Say teach this product to show me one.", { append: true });
+  else if (shelf.mode === "fallback") await speak("The shelf detector is not installed, so I am using the basic one. It may miss products.", { append: true });
+  if (nIndexed) setStatus(`Indexed ${nIndexed} photos. Shelf mode.`);
+}
+
+function stopShelf(say = true) {
+  shelf?.stop(); shelf = null; shelfTeach = null;
+  shelfUi(false);
+  busy = false; scanner?.resume(); armHints();
+  setStatus("Scanning. Point the back of the pack at the camera.");
+  if (say) speak("Shelf mode off. Scanning for barcodes.");
+}
+
+async function readCentre() {
+  const t = shelf?.centreTrack();
+  if (!t) { await speak("I cannot see a product in the middle. Centre one product and try again."); return; }
+  await speak("Reading the middle product.");
+  const crop = shelf.crop(t);
+  const ocr = await import("./ocr.js"), id = await import("./identify.js");
+  let r = { lines: [], text: "" };
+  try { r = await ocr.readLabel(crop); } catch { /* reader unavailable */ }
+  const who = id.identify(r.lines), facts = ocr.extractFacts(r.text);
+  const parts = [];
+  if (who.brand || who.title) parts.push(`This looks like ${[who.brand, who.title].filter(Boolean).join(", ")}`);
+  if (facts.mrp) parts.push(`Price printed ${facts.mrp} rupees`);
+  if (facts.net) parts.push(`Net quantity ${facts.net}`);
+  const known = r.text ? ocr.matchKnown(r.text, await allKnown()) : null;
+  if (known) parts.push(`This matches ${known.brand ? known.brand + " " : ""}${known.name} in my list`);
+  await speak(parts.length ? parts.join(". ") + "." : "I could not read enough text on the middle product. Move closer to it and try again.");
+}
+
+async function teachCentre() {
+  const t = shelf?.centreTrack();
+  if (!t) { await speak("I cannot see a product in the middle. Centre one product and try again."); return; }
+  await speak("Keep the product in the middle and hold steady. Taking pictures.");
+  const crops = await shelf.collectCrops(8);
+  if (crops.length < 3) { await speak("I could not get a steady view of it. Please try again."); return; }
+  const code = internalCode();
+  shelfTeach = { code, crops };
+  beep("ok");
+  openForm(code, {});
+}
+
+async function saveShelfCrops(code, crops) {
+  const refs = await import("./refs.js"), { embed } = await import("./embed.js");
+  const session = photos.newSession();
+  let n = 0;
+  for (let i = 0; i < crops.length; i++) {
+    await photos.addPhoto(code, session, i, crops[i]);
+    const vec = await embed(crops[i]);
+    if (vec) { await refs.addRef(photos.key(code, session, i), code, vec); n++; }
+  }
+  if (shelf) { shelf.refs = await refs.loadRefs(true); shelf.names.delete(code); const p = await lookupLocal(code); if (p) shelf.names.set(code, p.brand && !p.name.toLowerCase().includes(p.brand.toLowerCase()) ? `${p.brand} ${p.name}` : p.name); }
+  await speak(`I will now recognise it on the shelf from ${n} pictures.`, { append: true });
+}
+
+/** Voice commands while shelf mode is on. Returns true if handled. */
+async function shelfVoice(said) {
+  const s = said.toLowerCase();
+  if (/\b(stop|exit|leave|end) (the )?shelf|stop shelf/.test(s)) { stopShelf(); return true; }
+  if (/\bteach|\bremember this|learn this/.test(s)) { await teachCentre(); return true; }
+  if (/\bread\b.*\b(middle|centre|center|this)\b|\bread\b.*\bproduct/.test(s)) { await readCentre(); return true; }
+  const side = s.match(/\b(left|middle|centre|center|right)\b/);
+  if (side && /what|which|anything|describe|tell/.test(s)) { await speak(shelf.side(side[1] === "centre" || side[1] === "center" ? "middle" : side[1])); return true; }
+  if (/\bwhere\b|\bfind\b|\blocate\b/.test(s)) { await speak(shelf.where(s)); return true; }
+  if (/what|describe|see|shelf|tell me|repeat/.test(s)) { shelf.markAllAnnounced(); await speak(shelf.describeNow()); return true; }
+  return false;
+}
+
+$("shelfOn").onclick = startShelf;
+$("shelfDescribe").onclick = async () => { if (shelf) { shelf.markAllAnnounced(); await speak(shelf.describeNow()); } };
+$("shelfRead").onclick = readCentre;
+$("shelfTeach").onclick = teachCentre;
+$("shelfStop").onclick = () => stopShelf();
 
 // ------------------------------------------------------------ misc controls
 async function keepAwake() {

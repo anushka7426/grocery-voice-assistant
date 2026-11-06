@@ -2,11 +2,11 @@
 // reader and the camera model (large) are cached the first time they are used while online.
 // Open Food Facts requests are never cached here (app code caches results itself).
 
-const VERSION = "gva-v6";
+const VERSION = "gva-v7";
 const SHELL = [
   "./", "index.html", "styles.css", "manifest.webmanifest",
   "js/app.js", "js/scanner.js", "js/lookup.js", "js/describe.js", "js/speech.js",
-  "js/store.js", "js/vision.js", "js/ppocr.js", "js/identify.js", "js/photos.js", "js/zip.js", "js/classifier.js", "js/gtin.js", "js/ocr.js", "data/products-in.json",
+  "js/store.js", "js/vision.js", "js/ppocr.js", "js/identify.js", "js/photos.js", "js/zip.js", "js/classifier.js", "js/gtin.js", "js/shelf.js", "js/embed.js", "js/refs.js", "js/tracker.js", "js/ocr.js", "data/products-in.json",
   "vendor/zxing/reader/index.js", "vendor/zxing/share.js", "vendor/zxing/zxing_reader.wasm",
   "icons/icon-192.png", "icons/icon-512.png",
 ];

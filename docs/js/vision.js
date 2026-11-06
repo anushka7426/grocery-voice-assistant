@@ -10,21 +10,69 @@
 //     and is spoken only as a hedged "possible match".
 
 const BASE = new URL("../", import.meta.url);
-let session = null, meta = null, ort = null;
+let ort = null;
 
-async function load() {
-  if (session) return;
+async function loadOrt() {
+  if (ort) return ort;
   ort = await import("../vendor/ort/ort.wasm.min.mjs");
   ort.env.wasm.wasmPaths = new URL("vendor/ort/", BASE).href;
   ort.env.wasm.numThreads = 1;           // threads need cross-origin isolation (not on GitHub Pages)
-  meta = await (await fetch(new URL("model/labels.json", BASE))).json();
-  session = await ort.InferenceSession.create(new URL("model/grocery.onnx", BASE).href, {
-    executionProviders: ["wasm"],
-  });
+  return ort;
 }
 
-export const warmUp = () => load().catch(() => {});
-export const names = () => meta?.names || [];
+/** One ONNX detector (YOLOv8 output [1, 4 + classes, anchors]). */
+class Detector {
+  constructor(modelPath, metaPath) { this.modelPath = modelPath; this.metaPath = metaPath; this.session = null; this.meta = null; this.missing = false; }
+  async load() {
+    if (this.session) return true;
+    if (this.missing) return false;
+    try {
+      const o = await loadOrt();
+      const r = await fetch(new URL(this.metaPath, BASE));
+      if (!r.ok) throw new Error("no meta");
+      this.meta = await r.json();
+      this.session = await o.InferenceSession.create(new URL(this.modelPath, BASE).href, { executionProviders: ["wasm"] });
+      return true;
+    } catch (e) { this.missing = true; this.error = e; return false; }
+  }
+  async detect(canvas, { conf = 0.25, nms = 0.45, agnostic = false } = {}) {
+    if (!(await this.load())) throw this.error || new Error("model missing");
+    const size = this.meta.imgsz || 640;
+    const { data, r, dx, dy } = preprocess(canvas, size);
+    const out = await this.session.run({ [this.session.inputNames[0]]: new ort.Tensor("float32", data, [1, 3, size, size]) });
+    const t = out[this.session.outputNames[0]];
+    const [, ch, n] = t.dims;               // [1, 4 + classes, anchors]
+    const nc = ch - 4, p = t.data;
+    const cands = [];
+    for (let i = 0; i < n; i++) {
+      let best = 0, k = -1;
+      for (let c = 0; c < nc; c++) {
+        const sc = p[(4 + c) * n + i];
+        if (sc > best) { best = sc; k = c; }
+      }
+      if (best < conf) continue;
+      const cx = p[i], cy = p[n + i], w = p[2 * n + i], h = p[3 * n + i];
+      cands.push({
+        index: k, conf: best,
+        box: [(cx - w / 2 - dx) / r, (cy - h / 2 - dy) / r, (cx + w / 2 - dx) / r, (cy + h / 2 - dy) / r],
+      });
+    }
+    cands.sort((a, b) => b.conf - a.conf);
+    const keep = [];
+    for (const c of cands) {
+      if (keep.every((k) => (!agnostic && k.index !== c.index) || iou(k.box, c.box) < nms)) keep.push(c);
+    }
+    return keep.map((c) => ({ ...c, label: this.meta.names[c.index] }));
+  }
+}
+
+const main = new Detector("model/grocery.onnx", "model/labels.json");
+/** Optional generic "product" detector trained on shelf photos (see training/README.md). */
+export const shelfDetector = new Detector("model/shelf-detector.onnx", "model/shelf-detector.json");
+
+export const warmUp = () => main.load().catch(() => {});
+export const names = () => main.meta?.names || [];
+export const detect = (canvas, opts) => main.detect(canvas, opts);
 
 /** Letterbox a canvas to size x size (grey padding), return CHW float tensor data. */
 function preprocess(src, size) {
@@ -55,37 +103,6 @@ function iou(a, b) {
   return u > 0 ? inter / u : 0;
 }
 
-/** @returns {Promise<{index:number,label:string,conf:number,box:number[]}[]>} best first */
-export async function detect(canvas, { conf = 0.25, nms = 0.45 } = {}) {
-  await load();
-  const size = meta.imgsz || 640;
-  const { data, r, dx, dy } = preprocess(canvas, size);
-  const out = await session.run({ [session.inputNames[0]]: new ort.Tensor("float32", data, [1, 3, size, size]) });
-  const t = out[session.outputNames[0]];
-  const [, ch, n] = t.dims;               // [1, 4 + classes, anchors]
-  const nc = ch - 4, p = t.data;
-  const cands = [];
-  for (let i = 0; i < n; i++) {
-    let best = 0, k = -1;
-    for (let c = 0; c < nc; c++) {
-      const s = p[(4 + c) * n + i];
-      if (s > best) { best = s; k = c; }
-    }
-    if (best < conf) continue;
-    const cx = p[i], cy = p[n + i], w = p[2 * n + i], h = p[3 * n + i];
-    cands.push({
-      index: k, conf: best,
-      box: [(cx - w / 2 - dx) / r, (cy - h / 2 - dy) / r, (cx + w / 2 - dx) / r, (cy + h / 2 - dy) / r],
-    });
-  }
-  cands.sort((a, b) => b.conf - a.conf);
-  const keep = [];
-  for (const c of cands) {
-    if (keep.every((k) => k.index !== c.index || iou(k.box, c.box) < nms)) keep.push(c);
-  }
-  return keep.map((c) => ({ ...c, label: meta.names[c.index] }));
-}
-
 // ---------------------------------------------------------------- cross-check with OCR text
 const words = (s) => (s.toLowerCase().match(/[a-z]+/g) || []);
 function close(a, b) {                       // equal, or one edit away for longer words
@@ -103,7 +120,7 @@ function close(a, b) {                       // equal, or one edit away for long
 /** True when the OCR text contains the brand/flavour words of class `index`. */
 export function agreesWithText(index, text) {
   const seen = words(text);
-  return meta.keywords[index].every((group) => group.some((k) => seen.some((w) => close(k, w))));
+  return main.meta.keywords[index].every((group) => group.some((k) => seen.some((w) => close(k, w))));
 }
 
 /** Short name for speech: drop the pack size at the end. */

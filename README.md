@@ -57,3 +57,16 @@ Aim for 40+ photos per product in at least 2 sessions and 100+ "other" photos. S
 - Visual model dataset: Roboflow Universe *grocery-dataset-q9fj2* (CC BY 4.0), see above.
 - Text reader: PaddleOCR PP-OCRv4 (Apache-2.0), ONNX export from the `@gutenye/ocr-models` package (MIT); Tesseract.js (Apache-2.0) as fallback.
 - Barcode: zxing-wasm (MIT). Inference: onnxruntime-web (MIT). Product data: Open Food Facts (ODbL).
+
+
+## Shelf mode (many products at once)
+
+Tap **Scan a shelf** and move the phone slowly along a shelf. The app finds every product in view, follows each across frames, works out which product each one is, and says for example: "I can see 6 products. Left: Parle-G, Nutella. Middle: Gobbles. 1 could not be identified." Voice: "what is on the left", "where is the Parle-G", "read the middle product", "teach this product".
+
+How it works: detector (boxes) -> tracker (identity over frames) -> embedding of each box (`docs/model/embed.onnx`, 1280 numbers) -> nearest saved photo -> vote over frames. New products are added by photos (in-app training photos, or **Teach this product** on the shelf); no retraining.
+
+What you must still do:
+- Train the shelf detector on a GPU: `python training/train_shelf_detector.py` (SKU-110K, one class). Until `docs/model/shelf-detector.onnx` exists the app falls back to the 25-product detector, which misses most products.
+- Optionally bundle photos of your products: `python training/build_refs.py --photos photos`.
+
+Limits: the embedding model is a generic ImageNet one, so look-alike packs (same brand, different flavour) can be confused; matching thresholds (`CFG` in `docs/js/shelf.js`) were calibrated only on synthetic images and need tuning on real shelf photos; far or small products are skipped; speed on a phone has not been measured. Ultralytics is AGPL-3.0 and SKU-110K is non-commercial.
