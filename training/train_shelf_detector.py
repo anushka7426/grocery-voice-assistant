@@ -31,16 +31,20 @@ p.add_argument("--batch", type=int, default=16)
 p.add_argument("--device", default=None)
 p.add_argument("--out", default="docs/model")
 p.add_argument("--name", default="shelf", help="run name; use another for fine-tuning so the first run is kept")
+p.add_argument("--workers", type=int, default=4, help="data-loader processes; lower it (2) if the computer runs out of memory")
+p.add_argument("--fraction", type=float, default=1.0, help="use only this share of the training images (e.g. 0.3) for a faster first try")
 p.add_argument("--max_det", type=int, default=300, help="shelves can hold many products")
 a = p.parse_args()
 
 model = YOLO(a.model)
 model.train(data=a.data, epochs=a.epochs, imgsz=a.imgsz, batch=a.batch, device=a.device,
-            max_det=a.max_det, project="runs", name=a.name, exist_ok=True)
-best = Path(f"runs/{a.name}/weights/best.pt")
+            max_det=a.max_det, workers=a.workers, fraction=a.fraction,
+            project=str(Path("runs").resolve()), name=a.name, exist_ok=True)
+best = Path(model.trainer.best)      # ultralytics may put runs under runs/detect/, so ask it where best.pt is
 onnx = YOLO(str(best)).export(format="onnx", imgsz=a.imgsz, opset=12, simplify=True, dynamic=False)
 out = Path(a.out); out.mkdir(parents=True, exist_ok=True)
 shutil.copy(onnx, out / "shelf-detector.onnx")
 (out / "shelf-detector.json").write_text(json.dumps({"imgsz": a.imgsz, "names": ["product"]}))
 print("wrote", out / "shelf-detector.onnx", "and shelf-detector.json")
-print("Check it:  yolo val model=runs/%s/weights/best.pt data=%s" % (a.name, a.data))
+print("Check it:  yolo val model=%s data=%s" % (best, a.data))
+print("Next:   python training/prelabel_shelves.py --images <folder> --model %s" % best)
